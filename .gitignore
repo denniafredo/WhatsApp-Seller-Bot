@@ -2,3 +2,4 @@ node_modules/
 tokens/
 data/
 *.log
+.env

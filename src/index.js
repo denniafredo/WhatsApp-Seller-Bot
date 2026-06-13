@@ -12,6 +12,8 @@ const sessionName = process.env.WPP_SESSION || 'business-bot';
 const businessPhoneNumber = process.env.BUSINESS_PHONE || '';
 const welcomeMenuMode = process.env.WELCOME_MENU_MODE || 'list';
 const textMenuFallback = process.env.TEXT_MENU_FALLBACK === 'true';
+const chromePath = process.env.CHROME_PATH || undefined;
+const puppeteerHeadless = process.env.PUPPETEER_HEADLESS !== 'false';
 const welcomeMessage = createWelcomeMessage(businessPhoneNumber);
 const welcomeListOptions = createWelcomeListOptions();
 const welcomeStore = createWelcomeStore();
@@ -23,6 +25,19 @@ wppconnect
     autoClose: 0,
     tokenStore: 'file',
     folderNameToken: './tokens',
+    puppeteerOptions: {
+      headless: puppeteerHeadless,
+      executablePath: chromePath,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+      ],
+    },
   })
   .then(start)
   .catch((error) => {
@@ -42,7 +57,7 @@ function start(client) {
       return;
     }
 
-    const shouldSendWelcome = !welcomeStore.has(message.from);
+    const shouldSendWelcome = welcomeStore.has(message.from);
 
     if (shouldSendWelcome) {
       try {
