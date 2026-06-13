@@ -1,0 +1,17 @@
+{
+  "name": "whatsapp-product-image-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp bot that replies to product price-list keywords with images.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@wppconnect-team/wppconnect": "latest",
+    "dotenv": "latest"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true
+}
