@@ -23,9 +23,6 @@ wppconnect
     autoClose: 0,
     tokenStore: 'file',
     folderNameToken: './tokens',
-    statusFind: (statusSession, session) => {
-      console.log(`[${session}] status: ${statusSession}`);
-    },
   })
   .then(start)
   .catch((error) => {
@@ -34,17 +31,6 @@ wppconnect
   });
 
 function start(client) {
-  console.log('WhatsApp bot is running.');
-  console.log(
-    businessPhoneNumber
-      ? 'Welcome menu links are enabled.'
-      : 'Welcome menu links are disabled. Set BUSINESS_PHONE to enable prefilled WhatsApp links.'
-  );
-  console.log(`Welcome menu mode: ${welcomeMenuMode}`);
-  console.log(`Text menu fallback: ${textMenuFallback ? 'enabled' : 'disabled'}`);
-  console.log('Active keywords:');
-  replies.forEach((reply) => console.log(`- ${reply.keyword}`));
-
   client.onMessage(async (message) => {
     if (message.fromMe) {
       return;
@@ -62,7 +48,6 @@ function start(client) {
       try {
         await sendWelcomeMenu(client, message.from);
         welcomeStore.add(message.from);
-        console.log(`Sent welcome menu to ${message.from}`);
       } catch (error) {
         console.error(`Failed to send welcome menu to ${message.from}:`, error);
       }
@@ -77,7 +62,6 @@ function start(client) {
     const locationReply = findLocationReply(incomingText);
     if (locationReply) {
       await client.sendText(message.from, locationReply);
-      console.log(`Sent address text to ${message.from}`);
       return;
     }
 
@@ -97,7 +81,6 @@ function start(client) {
 
     try {
       await client.sendImage(message.from, reply.imagePath, reply.fileName, reply.caption);
-      console.log(`Sent "${reply.keyword}" image to ${message.from}`);
     } catch (error) {
       console.error(`Failed to send "${reply.keyword}" image to ${message.from}:`, error);
     }
@@ -107,7 +90,6 @@ function start(client) {
 async function sendPaymentReply(client, chatId, paymentReply) {
   if (paymentReply.type === 'text') {
     await client.sendText(chatId, paymentReply.text);
-    console.log(`Sent "${paymentReply.keyword}" payment text to ${chatId}`);
     return;
   }
 
@@ -123,7 +105,6 @@ async function sendPaymentReply(client, chatId, paymentReply) {
     paymentReply.fileName,
     paymentReply.caption
   );
-  console.log(`Sent "${paymentReply.keyword}" payment image to ${chatId}`);
 }
 
 async function sendWelcomeMenu(client, chatId) {
