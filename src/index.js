@@ -51,14 +51,18 @@ function start(client) {
       return;
     }
 
+    if (isGroupMessage(message)) {
+      return;
+    }
+
     const incomingText = getIncomingText(message);
 
     if (!incomingText) {
       return;
     }
 
-    const shouldSendWelcome = welcomeStore.has(message.from);
-
+    const shouldSendWelcome = !welcomeStore.has(message.from);
+    console.log(`Received message from ${message.from}: "${incomingText}". Should send welcome: ${shouldSendWelcome}`);
     if (shouldSendWelcome) {
       try {
         await sendWelcomeMenu(client, message.from);
@@ -169,4 +173,20 @@ function getIncomingText(message) {
   const matchedMenuItem = menuItems.find((item) => normalizeKeyword(item.listTitle) === normalizedBody);
 
   return matchedMenuItem ? matchedMenuItem.keyword : message.body;
+}
+
+function isGroupMessage(message) {
+  if (message.isGroupMsg || message.isGroup) {
+    return true;
+  }
+
+  const chatIds = [
+    message.from,
+    message.to,
+    message.chatId,
+    message.id?.remote,
+    message.chat?.id?._serialized,
+  ];
+
+  return chatIds.some((chatId) => String(chatId || '').endsWith('@g.us'));
 }
