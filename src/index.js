@@ -46,6 +46,8 @@ wppconnect
   });
 
 function start(client) {
+  const botStartedAtMs = Date.now();
+
   client.onMessage(async (message) => {
     if (message.fromMe) {
       return;
@@ -55,18 +57,40 @@ function start(client) {
       return;
     }
 
+    if (isStatusBroadcastMessage(message)) {
+      return;
+    }
+
+    if (isBlockedChatMessage(message)) {
+      console.log(`Skipped blocked chat ${message.from}.`);
+      return;
+    }
+
+    if (isHistoricalMessage(message, botStartedAtMs)) {
+      console.log(`Skipped old message from ${message.from}.`);
+      return;
+    }
+
     const incomingText = getIncomingText(message);
 
     if (!incomingText) {
       return;
     }
 
+    if (isJobInquiry(incomingText)) {
+      console.log(`Skipped job inquiry from ${message.from}: "${incomingText}".`);
+      return;
+    }
+
+    console.log(`Received message from ${message.from}: "${incomingText}".`);
+
     const shouldSendWelcome = !welcomeStore.has(message.from);
-    console.log(`Received message from ${message.from}: "${incomingText}". Should send welcome: ${shouldSendWelcome}`);
     if (shouldSendWelcome) {
       try {
         await sendWelcomeMenu(client, message.from);
         welcomeStore.add(message.from);
+        console.log(`Sent welcome menu to ${message.from}.`);
+
       } catch (error) {
         console.error(`Failed to send welcome menu to ${message.from}:`, error);
       }
@@ -75,12 +99,15 @@ function start(client) {
     const paymentReply = findPaymentReply(incomingText);
     if (paymentReply) {
       await sendPaymentReply(client, message.from, paymentReply);
+      console.log(`Sent payment reply for "${paymentReply.keyword}" to ${message.from}.`);
+
       return;
     }
 
     const locationReply = findLocationReply(incomingText);
     if (locationReply) {
       await client.sendText(message.from, locationReply);
+      console.log(`Sent location reply to ${message.from}.`);
       return;
     }
 
@@ -100,6 +127,7 @@ function start(client) {
 
     try {
       await client.sendImage(message.from, reply.imagePath, reply.fileName, reply.caption);
+      console.log(`Sent "${reply.keyword}" image to ${message.from}.`);
     } catch (error) {
       console.error(`Failed to send "${reply.keyword}" image to ${message.from}:`, error);
     }
@@ -189,4 +217,87 @@ function isGroupMessage(message) {
   ];
 
   return chatIds.some((chatId) => String(chatId || '').endsWith('@g.us'));
+}
+
+function isStatusBroadcastMessage(message) {
+  const chatIds = [
+    message.from,
+    message.to,
+    message.chatId,
+    message.id?.remote,
+    message.chat?.id?._serialized,
+  ];
+
+  return chatIds.some((chatId) => String(chatId || '') === 'status@broadcast');
+}
+
+function isBlockedChatMessage(message) {
+  const blockedChatIds = [
+    '270381629870324@lid',
+  ];
+  const chatIds = [
+    message.from,
+    message.to,
+    message.chatId,
+    message.id?.remote,
+    message.chat?.id?._serialized,
+  ];
+
+  return chatIds.some((chatId) => blockedChatIds.includes(String(chatId || '')));
+}
+
+function isJobInquiry(messageBody) {
+  const text = normalizeKeyword(messageBody);
+  const strongKeywords = [
+    'loker',
+    'lowongan',
+    'lamaran',
+    'melamar',
+    'hiring',
+    'rekrutmen',
+    'recruitment',
+    'vacancy',
+    'karir',
+  ];
+
+  if (strongKeywords.some((keyword) => text.includes(keyword))) {
+    return true;
+  }
+
+  return (
+    text.includes('cari kerja') ||
+    text.includes('nyari kerja') ||
+    text.includes('butuh kerja') ||
+    text.includes('ada kerjaan')
+  );
+}
+
+function isHistoricalMessage(message, botStartedAtMs) {
+  if (message.isNewMsg === false) {
+    return true;
+  }
+
+  const messageTimestampMs = getMessageTimestampMs(message);
+  if (!messageTimestampMs) {
+    return false;
+  }
+
+  return messageTimestampMs < botStartedAtMs - 5000;
+}
+
+function getMessageTimestampMs(message) {
+  const timestamp = [
+    message.timestamp,
+    message.t,
+    message.id?.timestamp,
+  ].find((value) => value !== undefined && value !== null);
+
+  const numericTimestamp = Number(timestamp);
+  if (!Number.isFinite(numericTimestamp) || numericTimestamp <= 0) {
+    return null;
+  }
+
+  return numericTimestamp < 1000000000000
+    ? numericTimestamp * 1000
+    : numericTimestamp;
 }

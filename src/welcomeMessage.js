@@ -100,7 +100,7 @@ function createWelcomeListOptions() {
     return `- ${item.label}`;
   });
   return {
-    buttonText: 'Lihat Produk',
+    buttonText: 'Lihat Price List',
     description: [
       'Terimakasih sudah menghubungi Dashmall - Sterofoam!',
       '',
