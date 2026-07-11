@@ -26,18 +26,12 @@ function shouldReplyAddress(message) {
     'sebelah mana',
   ];
 
-  const pickupKeywords = [
-    'ambil',
-    'pickup',
-    'cod',
-    'datang ke toko',
-  ];
+
 
   const hasStrongKeyword = strongKeywords.some((word) => text.includes(word));
   const hasQuestionKeyword = questionKeywords.some((word) => text.includes(word));
-  const hasPickupKeyword = pickupKeywords.some((word) => text.includes(word));
 
-  return hasStrongKeyword || hasPickupKeyword || (
+  return hasStrongKeyword || (
     text.includes('toko') && hasQuestionKeyword
   );
 }

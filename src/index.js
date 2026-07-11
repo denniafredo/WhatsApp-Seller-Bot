@@ -5,6 +5,9 @@ const wppconnect = require('@wppconnect-team/wppconnect');
 const { findReply, normalizeKeyword, replies } = require('./keywordReplies');
 const { findLocationReply } = require('./locationReplies');
 const { findPaymentReply } = require('./paymentReplies');
+const { getRecapMentionPeriod } = require('./recapMentionReply');
+const { buildRecapFromMessages } = require('./recapParser');
+const { getRecapOutput, updateRecapSheet } = require('./googleSheets');
 const { createWelcomeListOptions, createWelcomeMessage, menuItems } = require('./welcomeMessage');
 const { createWelcomeStore } = require('./welcomeStore');
 
@@ -14,6 +17,11 @@ const welcomeMenuMode = process.env.WELCOME_MENU_MODE || 'list';
 const textMenuFallback = process.env.TEXT_MENU_FALLBACK === 'true';
 const chromePath = process.env.CHROME_PATH || undefined;
 const puppeteerHeadless = process.env.PUPPETEER_HEADLESS !== 'false';
+const configuredRecapFormat = String(
+  process.env.RECAP_FORMAT || process.env.recap_format || 'pdf'
+).toLowerCase();
+const recapFormat = configuredRecapFormat === 'jpg' ? 'jpg' : 'pdf';
+const recapTimeZone = process.env.RECAP_TIMEZONE || 'Asia/Makassar';
 const welcomeMessage = createWelcomeMessage(businessPhoneNumber);
 const welcomeListOptions = createWelcomeListOptions();
 const welcomeStore = createWelcomeStore();
@@ -47,13 +55,27 @@ wppconnect
 
 function start(client) {
   const botStartedAtMs = Date.now();
+  let loggedInWhatsAppIds;
+
+  const getLoggedInWhatsAppIds = async () => {
+    if (!loggedInWhatsAppIds) {
+      const wid = await client.getWid();
+      const pnLidEntry = await client.getPnLidEntry(wid).catch(() => ({}));
+      loggedInWhatsAppIds = [
+        wid,
+        pnLidEntry.lid?._serialized,
+        pnLidEntry.phoneNumber?._serialized,
+        businessPhoneNumber,
+      ].filter(Boolean);
+
+      console.log(`Bot mention IDs: ${loggedInWhatsAppIds.join(', ')}`);
+    }
+
+    return loggedInWhatsAppIds;
+  };
 
   client.onMessage(async (message) => {
     if (message.fromMe) {
-      return;
-    }
-
-    if (isGroupMessage(message)) {
       return;
     }
 
@@ -68,6 +90,78 @@ function start(client) {
 
     if (isHistoricalMessage(message, botStartedAtMs)) {
       console.log(`Skipped old message from ${message.from}.`);
+      return;
+    }
+
+    if (isGroupMessage(message)) {
+      console.log(`Received group message from ${message.from}: "${message.body}".`);
+      try {
+        const botIds = await getLoggedInWhatsAppIds();
+        const recapPeriod = getRecapMentionPeriod(message, botIds);
+        if (recapPeriod) {
+          await client.sendText(message.from, 'Recaping...');
+
+          const messages = await client.getMessages(message.from, { count: 300 });
+          const commandTimestamp = getMessageTimestampMs(message) || Date.now();
+          const targetDate = getRecapDateLabel(recapPeriod, commandTimestamp, recapTimeZone);
+          const recapMessages = messages
+            .filter((groupMessage) => {
+              const timestamp = getMessageTimestampMs(groupMessage);
+              return groupMessage.id !== message.id && (!timestamp || timestamp <= commandTimestamp);
+            })
+            .sort((left, right) =>
+              (getMessageTimestampMs(left) || 0) - (getMessageTimestampMs(right) || 0)
+            );
+          let recap = buildRecapFromMessages(recapMessages, targetDate);
+          let usedLatestFallback = false;
+
+          if (!recap && recapPeriod === 'today') {
+            recap = buildRecapFromMessages(recapMessages);
+            usedLatestFallback = Boolean(recap);
+          }
+
+          if (!recap) {
+            await client.sendText(
+              message.from,
+              `Pesanan tanggal ${targetDate} belum ditemukan di 300 pesan terakhir.`
+            );
+            return;
+          }
+
+          await updateRecapSheet(recap);
+          const output = await getRecapOutput(recapFormat);
+          const warning = recap.unknownProducts.length
+            ? ` Produk belum dikenali: ${recap.unknownProducts.join(', ')}.`
+            : '';
+          await client.sendText(
+            message.from,
+            `Rekap ${recap.date} berhasil dimasukkan (${recap.quantities.length} item).${
+              usedLatestFallback ? ` Pesanan ${targetDate} belum ada, jadi dipakai pesanan terakhir.` : ''
+            }${warning}`
+          );
+          await client.sendFileFromBase64(
+            message.from,
+            output.fileBase64,
+            `rekap-${recap.date.replace(/\s+/g, '-')}.${output.fileExtension}`,
+            `Rekap ${recap.date} — range A1:E62`
+          );
+          await client.sendText(
+            message.from,
+            [
+              `Total = *${output.totalAmount}*`,
+              `Jumlah = ${output.totalQuantity}`,
+              '-----------------------------',
+              `KAS = *${output.cashAmount}*`,
+              `Jumlah = ${output.cashQuantity}`,
+            ].join('\n')
+          );
+          console.log(`Updated recap sheet for ${recap.date} from ${message.from}.`);
+        }
+      } catch (error) {
+        console.error(`Failed to handle group mention from ${message.from}:`, error);
+        await client.sendText(message.from, `Rekap gagal: ${error.message}`).catch(() => { });
+      }
+
       return;
     }
 
@@ -300,4 +394,18 @@ function getMessageTimestampMs(message) {
   return numericTimestamp < 1000000000000
     ? numericTimestamp * 1000
     : numericTimestamp;
+}
+
+function getRecapDateLabel(period, referenceTimestampMs, timeZone) {
+  const offsetMs = period === 'yesterday' ? 24 * 60 * 60 * 1000 : 0;
+  const targetDate = new Date(referenceTimestampMs - offsetMs);
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    day: 'numeric',
+    month: 'numeric',
+  }).formatToParts(targetDate);
+  const day = parts.find((part) => part.type === 'day')?.value;
+  const monthNumber = Number(parts.find((part) => part.type === 'month')?.value);
+  return `${day} ${monthNames[monthNumber - 1]}`;
 }
