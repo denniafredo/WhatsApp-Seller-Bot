@@ -56,6 +56,7 @@ wppconnect
 function start(client) {
   const botStartedAtMs = Date.now();
   let loggedInWhatsAppIds;
+  const groupMessageBuffers = new Map();
 
   const getLoggedInWhatsAppIds = async () => {
     if (!loggedInWhatsAppIds) {
@@ -95,19 +96,32 @@ function start(client) {
 
     if (isGroupMessage(message)) {
       console.log(`Received group message from ${message.from}: "${message.body}".`);
+      rememberGroupMessage(groupMessageBuffers, message);
       try {
         const botIds = await getLoggedInWhatsAppIds();
         const recapPeriod = getRecapMentionPeriod(message, botIds);
         if (recapPeriod) {
           await client.sendText(message.from, 'Recaping...');
 
-          const messages = await client.getMessages(message.from, { count: 300 });
+          const historyMessages = await client
+            .getMessages(message.from, { count: 300 })
+            .catch((error) => {
+              console.error(`Failed to load group history ${message.from}, using live buffer:`, error);
+              return [];
+            });
+          const bufferedMessages = groupMessageBuffers.get(message.from) || [];
+          const messagesById = new Map();
+          [...historyMessages, ...bufferedMessages].forEach((groupMessage) => {
+            messagesById.set(getMessageIdentity(groupMessage), groupMessage);
+          });
+          const messages = [...messagesById.values()];
           const commandTimestamp = getMessageTimestampMs(message) || Date.now();
           const targetDate = getRecapDateLabel(recapPeriod, commandTimestamp, recapTimeZone);
           const recapMessages = messages
             .filter((groupMessage) => {
               const timestamp = getMessageTimestampMs(groupMessage);
-              return groupMessage.id !== message.id && (!timestamp || timestamp <= commandTimestamp);
+              return getMessageIdentity(groupMessage) !== getMessageIdentity(message) &&
+                (!timestamp || timestamp <= commandTimestamp);
             })
             .sort((left, right) =>
               (getMessageTimestampMs(left) || 0) - (getMessageTimestampMs(right) || 0)
@@ -394,6 +408,33 @@ function getMessageTimestampMs(message) {
   return numericTimestamp < 1000000000000
     ? numericTimestamp * 1000
     : numericTimestamp;
+}
+
+function getMessageIdentity(message) {
+  const id = message.id?._serialized || message.id?.id || message.id;
+  if (id && typeof id !== 'object') {
+    return String(id);
+  }
+
+  return [
+    getMessageTimestampMs(message) || 0,
+    message.author || message.from || '',
+    message.body || message.content || '',
+  ].join('|');
+}
+
+function rememberGroupMessage(groupMessageBuffers, message) {
+  const messages = groupMessageBuffers.get(message.from) || [];
+  const identity = getMessageIdentity(message);
+  const existingIndex = messages.findIndex((item) => getMessageIdentity(item) === identity);
+
+  if (existingIndex >= 0) {
+    messages[existingIndex] = message;
+  } else {
+    messages.push(message);
+  }
+
+  groupMessageBuffers.set(message.from, messages.slice(-300));
 }
 
 function getRecapDateLabel(period, referenceTimestampMs, timeZone) {

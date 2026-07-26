@@ -108,6 +108,7 @@ function normalizeProductName(value) {
   return String(value || '')
     .toLowerCase()
     .replace(/lembaran\s+(\d+)\s*cm/g, 'lembaran $1cm')
+    .replace(/^pe\s+foam\s+tebal\s+/, 'pe foam ')
     .replace(/^box\s+lakban\s+(\d+)(?:\s+(.+))?$/, (_, size, variant) =>
       `box ${size}${variant ? ` ${variant}` : ''} lakban`
     )
@@ -157,9 +158,20 @@ function parseRecapMessage(body) {
 function normalizeRecapDate(value) {
   return String(value || '')
     .toLowerCase()
+    .replace(/\bjanuari\b|\bjanuary\b/g, 'jan')
+    .replace(/\bfebruari\b|\bfebruary\b/g, 'feb')
+    .replace(/\bmaret\b|\bmarch\b/g, 'mar')
+    .replace(/\bapril\b/g, 'apr')
     .replace(/\bmay\b/g, 'mei')
+    .replace(/\bjuni\b|\bjune\b/g, 'jun')
+    .replace(/\bjuli\b|\bjuly\b/g, 'jul')
+    .replace(/\bagustus\b|\baugust\b/g, 'agu')
     .replace(/\baug\b/g, 'agu')
+    .replace(/\bseptember\b/g, 'sep')
+    .replace(/\boktober\b|\boctober\b/g, 'okt')
     .replace(/\boct\b/g, 'okt')
+    .replace(/\bnovember\b/g, 'nov')
+    .replace(/\bdesember\b|\bdecember\b/g, 'des')
     .replace(/\bdec\b/g, 'des')
     .replace(/\s+/g, ' ')
     .trim();
@@ -167,7 +179,9 @@ function normalizeRecapDate(value) {
 
 function buildRecapFromMessages(messages, targetDate) {
   const parts = messages
-    .map((message) => parseRecapPart(message.body))
+    .map((message) => parseRecapPart(
+      message.body || message.content || message.caption || message.text
+    ))
     .map((part, index) => ({ part, index }))
     .filter(({ part }) => part);
   const datedParts = parts.filter(({ part }) => part.date);
