@@ -149,8 +149,7 @@ function start(client) {
             : '';
           await client.sendText(
             message.from,
-            `Rekap ${recap.date} berhasil dimasukkan (${recap.quantities.length} item).${
-              usedLatestFallback ? ` Pesanan ${targetDate} belum ada, jadi dipakai pesanan terakhir.` : ''
+            `Rekap ${recap.date} berhasil dimasukkan (${recap.quantities.length} item).${usedLatestFallback ? ` Pesanan ${targetDate} belum ada, jadi dipakai pesanan terakhir.` : ''
             }${warning}`
           );
           await client.sendFileFromBase64(
@@ -193,11 +192,12 @@ function start(client) {
     console.log(`Received message from ${message.from}: "${incomingText}".`);
 
     const shouldSendWelcome = !welcomeStore.has(message.from);
+    console.log(`shouldSendWelcome: ${shouldSendWelcome} for ${message.from}.`);
+
     if (shouldSendWelcome) {
       try {
         await sendWelcomeMenu(client, message.from);
         welcomeStore.add(message.from);
-        console.log(`Sent welcome menu to ${message.from}.`);
 
       } catch (error) {
         console.error(`Failed to send welcome menu to ${message.from}:`, error);
