@@ -109,6 +109,8 @@ const PRODUCT_ROWS = {
 function normalizeProductName(value) {
   return String(value || '')
     .toLowerCase()
+    // "Lem sterofoam 100ml" / "lem styrofoam 100 ml" -> "lem 100ml"
+    .replace(/^lem\s+st\w*fo\w*\s+/, 'lem ')
     .replace(/lembaran\s+(\d+)\s*cm/g, 'lembaran $1cm')
     .replace(/^pe\s+foam\s+tebal\s+/, 'pe foam ')
     // "PE Pipa tebal 1.5cm", "pipa 1,5 cm", "pe pipa tbl 1.5" -> "pe pipa tebal 1,5cm"
@@ -122,6 +124,19 @@ function normalizeProductName(value) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+// Jumlah boleh diikuti satuan: "= 10", "= 10 set", "= 10pcs", "= 10 lembar".
+const ITEM_UNITS = [
+  'set', 'pcs', 'pc', 'psc', 'buah', 'bh', 'biji', 'unit',
+  'roll', 'rol', 'lembar', 'lbr', 'lmbr', 'sheet',
+  'pack', 'pak', 'dus', 'box', 'karung', 'bal',
+  'kg', 'gram', 'gr', 'ml', 'liter', 'ltr', 'meter', 'mtr', 'm',
+];
+// Satuan diurut dari yang terpanjang supaya "roll" tidak keburu cocok sebagai "rol".
+const ITEM_PATTERN = new RegExp(
+  `^(.+?)\\s*=\\s*(\\d+)\\s*(?:${[...ITEM_UNITS].sort((a, b) => b.length - a.length).join('|')})?\\.?$`,
+  'i'
+);
 
 const MONTH_NAMES = [
   'januari', 'january', 'jan',
@@ -152,8 +167,14 @@ function parseRecapPart(body) {
   const unknownProducts = [];
 
   for (const line of lines.slice(dateMatch ? 1 : 0)) {
-    const itemMatch = line.match(/^(.+?)\s*=\s*(\d+)(?:\s+set)?$/i);
+    const itemMatch = line.match(ITEM_PATTERN);
     if (!itemMatch) {
+      // Baris berbentuk "produk = 10 xxx" tapi satuannya belum dikenal jangan dibuang diam-diam,
+      // laporkan supaya kelihatan di balasan rekap.
+      const looksLikeItem = line.match(/^(.+?)\s*=\s*\d/);
+      if (looksLikeItem) {
+        unknownProducts.push(looksLikeItem[1].trim());
+      }
       continue;
     }
 

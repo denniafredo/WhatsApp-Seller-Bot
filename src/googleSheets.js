@@ -157,4 +157,178 @@ async function getRecapOutput(format = 'pdf') {
   };
 }
 
-module.exports = { getRecapOutput, updateRecapSheet };
+function getShopeeSheetName() {
+  return process.env.SHOPEE_SHEET_NAME || 'Harga Shopee';
+}
+
+function parseSheetPrice(value) {
+  const digits = String(value ?? '').replace(/[^\d]/g, '');
+  if (!digits) {
+    return null;
+  }
+
+  const price = Number(digits);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+const SHOPEE_SHEET_HEADERS = [
+  'Produk',
+  'Harga',
+  'item_id (jangan diubah)',
+  'Status',
+  'Ringkas',
+  'Harga Terbaru',
+  'Sumber',
+];
+
+async function getSheetValues(range) {
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+  if (!spreadsheetId) {
+    throw new Error('GOOGLE_SHEET_ID belum diisi.');
+  }
+
+  const accessToken = await getAccessToken();
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error?.message || `Gagal membaca range ${range} di Google Sheet.`);
+  }
+
+  return result.values || [];
+}
+
+async function writeSheetRanges(data) {
+  if (!data.length) {
+    return null;
+  }
+
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+  const accessToken = await getAccessToken();
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ valueInputOption: 'RAW', data }),
+    }
+  );
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error?.message || 'Gagal menulis ke Google Sheet.');
+  }
+
+  return result;
+}
+
+async function getShopeePriceRows() {
+  const sheetName = getShopeeSheetName();
+  // Range terbuka (tanpa nomor baris akhir) supaya jumlah produk tidak terpotong.
+  const values = await getSheetValues(`'${sheetName}'!A2:G`);
+
+  return values.map((columns, index) => ({
+    row: index + 2,
+    product: String(columns[0] ?? '').trim(),
+    price: parseSheetPrice(columns[1]),
+    rawPrice: String(columns[1] ?? '').trim(),
+    target: String(columns[2] ?? '').trim(),
+    summary: String(columns[4] ?? '').trim(),
+    referencePrice: parseSheetPrice(columns[5]),
+    source: String(columns[6] ?? '').trim(),
+  }));
+}
+
+async function clearShopeePriceRows() {
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+  const sheetName = getShopeeSheetName();
+  const accessToken = await getAccessToken();
+  const range = encodeURIComponent(`'${sheetName}'!A2:G`);
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:clear`,
+    { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!response.ok) {
+    const result = await response.json();
+    throw new Error(result.error?.message || `Gagal mengosongkan tab "${sheetName}".`);
+  }
+
+  return true;
+}
+
+async function replaceShopeePriceRows(rows) {
+  const sheetName = getShopeeSheetName();
+
+  // Dikosongkan dulu supaya sisa impor sebelumnya tidak tertinggal, lalu ditulis sepanjang data.
+  await clearShopeePriceRows();
+
+  return writeSheetRanges([
+    { range: `'${sheetName}'!A1:G1`, values: [SHOPEE_SHEET_HEADERS] },
+    {
+      range: `'${sheetName}'!A2:G${rows.length + 1}`,
+      values: rows.map((row) => [
+        row.product,
+        row.price,
+        row.target,
+        row.note || '',
+        row.summary || '',
+        row.referencePrice ?? '',
+        row.source || '',
+      ]),
+    },
+  ]);
+}
+
+async function updateShopeePriceStatus(statuses) {
+  const sheetName = getShopeeSheetName();
+
+  return writeSheetRanges(
+    statuses.map((status) => ({
+      range: `'${sheetName}'!D${status.row}`,
+      values: [[status.text]],
+    }))
+  );
+}
+
+async function updateShopeeMappingColumns(rows) {
+  if (!rows.length) {
+    return null;
+  }
+
+  const sheetName = getShopeeSheetName();
+  const firstRow = rows[0].row;
+
+  // Baris dari getShopeePriceRows selalu berurutan, jadi kolom E:G bisa ditulis satu blok.
+  return writeSheetRanges([
+    {
+      range: `'${sheetName}'!E${firstRow}:G${firstRow + rows.length - 1}`,
+      values: rows.map((row) => [row.summary || '', row.referencePrice ?? '', row.source || '']),
+    },
+  ]);
+}
+
+async function applyShopeeReferencePrices(updates) {
+  const sheetName = getShopeeSheetName();
+
+  return writeSheetRanges(
+    updates.map((update) => ({
+      range: `'${sheetName}'!B${update.row}`,
+      values: [[update.price]],
+    }))
+  );
+}
+
+module.exports = {
+  applyShopeeReferencePrices,
+  getRecapOutput,
+  getSheetValues,
+  getShopeePriceRows,
+  replaceShopeePriceRows,
+  updateRecapSheet,
+  updateShopeeMappingColumns,
+  updateShopeePriceStatus,
+};
