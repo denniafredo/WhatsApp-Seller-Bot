@@ -50,6 +50,158 @@ Di dalam grup, **mention bot** lalu tulis salah satu:
 
 Bot membaca 300 pesan terakhir, mengisi tab "Template pembayaran" di Google Sheet, lalu mengirim balik file rekap + total.
 
+## Noise reduction video
+
+Kirim video ke **chat pribadi** bot, lalu picu dengan salah satu cara:
+
+- kirim videonya langsung dengan caption `noise`
+- atau reply video yang sudah terkirim lalu tulis `noise`
+
+Kata pemicunya sekaligus menentukan engine:
+
+| Kata pemicu | Engine |
+|---|---|
+| `noise`, `denoise`, `kurangi noise`, `hilangkan noise` | `voicecleaner` |
+| `lokal` | `deepfilternet` |
+| `bersihkan suara`, `bersihin suara` | ikut `VIDEO_DENOISE_ENGINE` |
+
+Pemetaannya ada di `triggerRules` pada [videoNoiseTrigger.js](src/videoNoiseTrigger.js) — menambah kata pemicu baru atau mengarahkannya ke engine lain cukup satu baris. Frasa terpanjang dicocokkan lebih dulu, jadi `kurangi noise` tidak tertutup oleh aturan `noise`.
+
+Bot membersihkan **noise audio** (desis, hum, AC, kipas, mobil lewat) dengan model AI yang jalan **lokal tanpa cloud**. Video stream di-`copy` tanpa re-encode, jadi **kualitas gambar tidak berubah sama sekali** — terbukti bit-exact lewat perbandingan MD5 stream video input dan output.
+
+Throughput terukur: `deepfilternet` ~4,5x realtime, `arnndn` ~45x realtime.
+
+Model ada di `assets/sh.rnnn` (~290KB, public domain, dari [GregorR/rnnoise-models](https://github.com/GregorR/rnnoise-models), varian *Recording noise x Speech signal*).
+
+Engine bisa ditukar lewat `VIDEO_DENOISE_ENGINE`:
+
+| Nilai | Isi |
+|---|---|
+| `arnndn` (default kode) | AI/RNNoise, satu pass ffmpeg. Butuh `assets/sh.rnnn`. |
+| `deepfilternet` | Deep learning modern, binary terpisah. Butuh `bin/deep-filter`. |
+| `afftdn` | Filter DSP klasik, tanpa AI: `highpass` + `afftdn` + `anlmdn`. |
+
+#### voicecleaner.ai
+
+Layanan web tanpa API, jadi audionya bolak-balik lewat sesi browser headless. Alur yang dipakai sudah diverifikasi langsung ke situsnya:
+
+```
+1. buka voicecleaner.ai
+2. klik "Log in to receive credits for free"     -> modal login
+3. isi email + password, klik "Log In"           -> bukti sukses: modal tertutup
+4. klik "My Device"                              -> input[type=file] baru muncul di sini
+5. uploadFile(audio.wav)
+6. tunggu panel "Select Enhancement Type"
+7. klik chip "Remove Noise"
+8. klik "Enhance Media"                          -> proses mulai
+9. tunggu "Download Result" muncul (~15-25 s)
+10. klik "Download Result" SEKALI               -> file turun via CDP
+11. mux ulang ke video dengan -c:v copy
+```
+
+Terukur: **35 detik** total untuk video 8 detik (login 4s, upload 2s, proses 18s, unduh 4s, mux 4s). Video tetap bit-exact dan audio-video tetap sinkron.
+
+**Wajib login dan memakai kredit harian.** Saat kuota habis, `VOICECLEANER_FALLBACK_ENGINE` (default `deepfilternet`) mengambil alih supaya pengirim tetap menerima video bersih, bukan pesan error. Kosongkan nilainya untuk mematikan fallback.
+
+```
+VOICECLEANER_EMAIL=
+VOICECLEANER_PASSWORD=
+VOICECLEANER_ENHANCEMENT=Remove Noise
+VOICECLEANER_FALLBACK_ENGINE=deepfilternet
+VOICECLEANER_HEADLESS=true
+```
+
+`VOICECLEANER_ENHANCEMENT` menerima nama chip lain yang tersedia di situsnya: `Remove Echo`, `Remove Wind Noise`, `Studio Sound`, `Normalize`, `Remove Background Audio`, `Remove Reverb`, dan lain-lain.
+
+**Tiga jebakan yang membuat alur ini gagal secara SENYAP** — ketiganya kena selama pengembangan dan alasannya ditulis sebagai komentar di [voiceCleanerClient.js](src/voiceCleanerClient.js):
+
+1. **Klik elemen terdalam, bukan pembungkus.** UI-nya nol elemen `<button>` — semuanya `div`. Event DOM merambat ke atas, jadi mengklik pembungkus tidak memicu handler anaknya. Pembungkus juga sering memuat dua kontrol sekaligus (`Download Result` + `Upload New File`).
+2. **Kecuali pemicu login dan tombol submit**, yang justru `<button>` asli — di situ strategi terdalam malah memilih `span` dekoratif yang tidak bisa diklik. Tombol submit ada **5 tingkat** di atas kolom password.
+3. **Bukti login bukan munculnya `input[type=file]`.** Input itu baru ada setelah "My Device" diklik, jadi menunggunya akan menggantung walau login sukses. Yang dipakai: hilangnya kolom password.
+
+Kalau alurnya rusak karena situsnya berubah, sunting blok `selectors` di [voiceCleanerClient.js](src/voiceCleanerClient.js) dan jalankan dengan `VOICECLEANER_HEADLESS=false` untuk melihat browsernya.
+
+#### DeepFilterNet
+
+Engine terbaik yang terukur, dan yang dipakai di `.env` proyek ini. Bukan filter ffmpeg melainkan binary tersendiri, jadi jalannya tiga langkah: ekstrak WAV 48k → `deep-filter` → mux ulang dengan `-c:v copy`.
+
+Binary tidak di-commit (`bin/` masuk `.gitignore`). Unduh dari [rilis DeepFilterNet](https://github.com/Rikorose/DeepFilterNet/releases/latest):
+
+| Platform | Asset | Ukuran |
+|---|---|---|
+| Windows | `deep-filter-<versi>-x86_64-pc-windows-msvc.exe` | 25,7 MB |
+| Ubuntu | `deep-filter-<versi>-x86_64-unknown-linux-musl` | 34,7 MB (static, tanpa dependency) |
+
+Simpan sebagai `bin/deep-filter.exe` (Windows) atau `bin/deep-filter` (Linux, jangan lupa `chmod +x`), atau arahkan `DEEPFILTER_PATH` ke lokasi lain.
+
+Flag `-D` selalu dipakai untuk mengompensasi delay STFT + lookahead model. Tanpa itu audio tertinggal 30 ms dari video (terukur); dengan itu 0 ms.
+
+`VIDEO_DENOISE_ATTEN_DB` membatasi kekuatan penekanan (100 = penuh). Turunkan kalau hasilnya terasa tidak natural. `VIDEO_DENOISE_DFN_POSTFILTER=true` menambah penekanan tanpa menambah ketumpulan.
+
+Kecepatannya ~4,5x realtime, jauh lebih lambat dari `arnndn` (~45x) tapi masih di atas kebutuhan.
+
+Perilaku yang perlu diketahui:
+
+- Batas ukuran input `VIDEO_MAX_MB` (default 16). Video lebih besar ditolak dengan pesan jelas.
+- Bitrate audio hasil tidak pernah melebihi bitrate sumber, supaya file tidak membengkak lewat batas kirim WhatsApp.
+- Video sekali-lihat (view-once) sengaja tidak diproses.
+- Video tanpa track audio dibalas dengan penjelasan, bukan error.
+- Proses dibatasi satu ffmpeg sekaligus; video berikutnya masuk antrean (maks 5 menunggu).
+- Timeout `VIDEO_JOB_TIMEOUT_MS` (default 5 menit), lalu proses di-kill dan folder temp dibersihkan.
+- Pesan biasa yang kebetulan memuat kata `noise` tanpa video tidak memicu apa-apa.
+
+Butuh `ffmpeg` + `ffprobe` di server (`FFMPEG_PATH` kalau tidak di PATH). Di Ubuntu: `sudo apt install ffmpeg`.
+
+### Menyetel kekuatan denoise
+
+`mix` memasang plafon matematis pada hasil: bagian sinyal yang tidak disentuh dilewatkan apa adanya, jadi `mix=0.85` menyisakan 20·log10(0,15) = **-16,5 dB** noise berapa pun bagusnya model. Karena itu defaultnya `mix=1` plus satu lapis `afftdn` ringan (`VIDEO_DENOISE_POLISH`).
+
+Terukur pada uji drive-by sintetis, di region tanpa suara orang:
+
+| Setelan | Noise terbuang |
+|---|---|
+| `mix=0.85` (default lama) | 16,1 dB |
+| `mix=1` | 39,9 dB |
+| `mix=1` + polish `afftdn` | 51,9 dB |
+
+**Batasnya:** angka di atas hanya berlaku saat tidak ada yang bicara. Ketika noise menimpa suara orang, semua setelan `arnndn` mentok di ~4 dB — itu batas arsitektur RNNoise, bukan salah setelan. Untuk kasus itu perlu model yang lebih baru seperti DeepFilterNet.
+
+### Kalau suara terdengar berat/tumpul
+
+Membersihkan lebih banyak noise selalu menumpulkan suara. Yang terukur pada pita 3-8 kHz:
+
+| Setelan | Noise turun | Ketumpulan |
+|---|---|---|
+| `arnndn` + `POLISH=true` | 48,4 dB | -6,7 dB (terdengar berat) |
+| `arnndn` (default) | 36,4 dB | -4,7 dB |
+| `arnndn` + `TREBLE=3` | 36,0 dB | -3,3 dB |
+| **`deepfilternet` + post-filter** | **37,4 dB** | **-1,8 dB** |
+| `deepfilternet` | 30,8 dB | -1,8 dB |
+
+DeepFilterNet menang di dua sisi sekaligus: membersihkan lebih banyak dari `arnndn` sekaligus 2,9 dB lebih tidak tumpul. Setelan `arnndn` mana pun harus memilih salah satu.
+
+`VIDEO_DENOISE_POLISH` default `false` justru karena ketumpulan lebih terasa mengganggu daripada tambahan pembersihannya. Kalau masih terdengar berat, naikkan `VIDEO_DENOISE_TREBLE` ke `3` atau `5`.
+
+### Membandingkan setelan pada video sendiri
+
+```bash
+npm run uji:noise -- path/ke/video.mp4
+```
+
+Menghasilkan 6 versi dengan setelan berbeda di folder yang sama, plus angka penurunan lantai noise. Angkanya untuk menyortir; keputusan tetap dengan mendengarkan, karena artefak berdenging atau suara hampa tidak muncul sebagai angka.
+
+### Membandingkan hasil dari sumber mana pun
+
+```bash
+npm run banding:noise -- asli.mp4 hasil-a.mp4 hasil-b.mp4
+```
+
+Argumen pertama file asli, sisanya hasil dari engine atau layanan apa pun — termasuk file yang kamu proses manual di layanan web lalu diunduh. Berguna untuk membuktikan apakah suatu layanan benar-benar mengalahkan engine lokal sebelum repot mengintegrasikannya.
+
+Metriknya memakai selisih persentil di dalam file yang sama, jadi **imun terhadap normalisasi loudness** — setiap layanan menormalisasi dengan caranya sendiri, dan perbandingan RMS absolut hanya akan mengukur makeup gain mereka, bukan kualitas denoise-nya.
+
+Angka dari `banding:noise` **tidak sebanding** dengan angka dari `uji:noise`: yang pertama mengukur file jadi, yang kedua mengukur sebelum `loudnorm`.
+
 ---
 
 # Bagian 2 — Sinkronisasi harga Shopee
@@ -219,4 +371,13 @@ Selain variabel bot yang sudah ada:
 | [src/hargaTerbaru.js](src/hargaTerbaru.js) | Parser tab "Harga Terbaru" |
 | [src/hargaTerbaruAliases.js](src/hargaTerbaruAliases.js) | Aturan mapping produk non-box |
 | [src/shopeeProductMap.js](src/shopeeProductMap.js) | Parser nama produk Shopee → section + ukuran |
+| [src/videoNoiseHandler.js](src/videoNoiseHandler.js) | Alur perintah noise reduction: validasi, antrean, balasan |
+| [src/videoNoiseReduction.js](src/videoNoiseReduction.js) | Engine denoise + pemanggilan ffmpeg/ffprobe |
+| [src/videoNoiseTrigger.js](src/videoNoiseTrigger.js) | Deteksi kata pemicu, caption, dan reply |
+| [src/videoJobQueue.js](src/videoJobQueue.js) | Antrean job (concurrency 1) |
+| [src/videoNoiseAbCli.js](src/videoNoiseAbCli.js) | Bandingkan setelan denoise pada satu video (`uji:noise`) |
+| [src/videoNoiseCompareCli.js](src/videoNoiseCompareCli.js) | Bandingkan file hasil dari sumber mana pun (`banding:noise`) |
+| [src/voiceCleanerClient.js](src/voiceCleanerClient.js) | Automation browser ke voicecleaner.ai |
+| [src/progressReporter.js](src/progressReporter.js) | Satu pesan status yang diperbarui per tahap |
+| [src/audioMetrics.js](src/audioMetrics.js) | Pengukuran audio bersama untuk kedua CLI |
 | [src/googleSheets.js](src/googleSheets.js) | Semua akses Google Sheets |

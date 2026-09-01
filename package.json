@@ -8,7 +8,9 @@
     "ambil:harga": "node src/shopeePriceImportCli.js",
     "map:harga": "node src/shopeePriceMapCli.js",
     "sync:harga": "node src/shopeePriceSyncCli.js",
-    "shopee:auth": "node src/shopeeAuthCli.js"
+    "shopee:auth": "node src/shopeeAuthCli.js",
+    "uji:noise": "node src/videoNoiseAbCli.js",
+    "banding:noise": "node src/videoNoiseCompareCli.js"
   },
   "dependencies": {
     "@wppconnect-team/wppconnect": "^2.2.7",

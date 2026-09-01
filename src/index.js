@@ -10,6 +10,8 @@ const { buildRecapFromMessages } = require('./recapParser');
 const { getRecapOutput, updateRecapSheet } = require('./googleSheets');
 const { createWelcomeListOptions, createWelcomeMessage, menuItems } = require('./welcomeMessage');
 const { createWelcomeStore } = require('./welcomeStore');
+const { createJobQueue } = require('./videoJobQueue');
+const { handleNoiseCommand } = require('./videoNoiseHandler');
 
 const sessionName = process.env.WPP_SESSION || 'business-bot';
 const businessPhoneNumber = process.env.BUSINESS_PHONE || '';
@@ -57,6 +59,9 @@ function start(client) {
   const botStartedAtMs = Date.now();
   let loggedInWhatsAppIds;
   const groupMessageBuffers = new Map();
+  // onMessage listeners run concurrently, so this bounds how many ffmpeg
+  // processes (and decrypted video buffers) can exist at the same time.
+  const videoJobQueue = createJobQueue({ concurrency: 1, maxPending: 5 });
 
   const getLoggedInWhatsAppIds = async () => {
     if (!loggedInWhatsAppIds) {
@@ -175,6 +180,21 @@ function start(client) {
         await client.sendText(message.from, `Rekap gagal: ${error.message}`).catch(() => { });
       }
 
+      return;
+    }
+
+    // Runs before getIncomingText because a video carries its command in
+    // `caption` rather than `body`, and an empty body would return early below.
+    // Also keeps a noise request from triggering the welcome menu.
+    const noiseHandled = await handleNoiseCommand(client, message, {
+      queue: videoJobQueue,
+      getBotIds: getLoggedInWhatsAppIds,
+    }).catch((error) => {
+      console.error(`Failed to handle noise command from ${message.from}:`, error);
+      return false;
+    });
+
+    if (noiseHandled) {
       return;
     }
 

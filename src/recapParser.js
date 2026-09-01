@@ -112,6 +112,14 @@ function normalizeProductName(value) {
     .toLowerCase()
     // "Lem sterofoam 100ml" / "lem styrofoam 100 ml" -> "lem 100ml"
     .replace(/^lem\s+st\w*fo\w*\s+/, 'lem ')
+    // "Lembaran PE 1cm" / "lembaran pe foam tebal 2 cm" -> "pe foam 1cm" (baris PE foam),
+    // ditulis sebelum aturan lembaran sterofoam supaya varian PE tidak ikut terbaca sebagai sterofoam.
+    .replace(
+      /^lemb?aran\s+pe(?:\s+foam)?(?:\s+lemb?aran)?(?:\s+50\s*x\s*100)?(?:\s+tebal)?\s+(\d+)\s*cm$/,
+      'pe foam $1cm'
+    )
+    // "Lembaran sterofoam 5cm" / "lembaran styrofoam 5 cm" -> "lembaran 5cm"
+    .replace(/^lemb?aran\s+st\w*fo\w*\s+/, 'lembaran ')
     .replace(/lembaran\s+(\d+)\s*cm/g, 'lembaran $1cm')
     // Semua ragam tulisan PE foam lembaran -> "pe foam 5cm".
     // "PE lembaran 5cm", "PE Foam tebal 5 cm", "pe foam lembaran 50x100 5cm", "pe lembaran 50x100 5cm".
