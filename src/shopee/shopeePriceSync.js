@@ -1,4 +1,4 @@
-const { getShopeePriceRows, updateShopeePriceStatus } = require('./googleSheets');
+const { getShopeePriceRows, updateShopeePriceStatus } = require('../sheets/googleSheets');
 const { createShopeeClient } = require('./shopeeClient');
 
 const BASE_INFO_CHUNK_SIZE = 20;

@@ -3,8 +3,8 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 
-const { probeMedia } = require('./videoNoiseReduction');
-const { findWindows, measureDynamicRange, measureTilt } = require('./audioMetrics');
+const { probeMedia } = require('../video/videoNoiseReduction');
+const { findWindows, measureDynamicRange, measureTilt } = require('../video/audioMetrics');
 
 function usage() {
   console.error('Cara pakai:');

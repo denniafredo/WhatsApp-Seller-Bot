@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const { buildSyncReport, syncShopeePrices } = require('./shopeePriceSync');
+const { buildSyncReport, syncShopeePrices } = require('../shopee/shopeePriceSync');
 
 syncShopeePrices()
   .then((result) => {

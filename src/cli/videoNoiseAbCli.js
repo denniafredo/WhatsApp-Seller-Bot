@@ -3,10 +3,10 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 
-const { probeMedia, reduceNoiseWithDeepFilter } = require('./videoNoiseReduction');
-const { findWindows, measureRms, measureTilt, runFfmpeg } = require('./audioMetrics');
+const { probeMedia, reduceNoiseWithDeepFilter } = require('../video/videoNoiseReduction');
+const { findWindows, measureRms, measureTilt, runFfmpeg } = require('../video/audioMetrics');
 
-const modelDir = path.join(__dirname, '..', 'assets');
+const modelDir = path.join(__dirname, '..', '..', 'assets');
 
 function toFilterModel(fileName) {
   return path

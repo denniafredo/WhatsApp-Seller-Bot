@@ -7,7 +7,7 @@ const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
 const ffprobePath = process.env.FFPROBE_PATH || deriveFfprobePath(ffmpegPath);
 const defaultEngine = String(process.env.VIDEO_DENOISE_ENGINE || 'arnndn').toLowerCase();
 const defaultModelPath =
-  process.env.VIDEO_DENOISE_MODEL || path.join(__dirname, '..', 'assets', 'sh.rnnn');
+  process.env.VIDEO_DENOISE_MODEL || path.join(__dirname, '..', '..', 'assets', 'sh.rnnn');
 // mix caps how much can ever be removed: the untouched share of the signal is
 // kept verbatim, so mix=0.85 leaves 20*log10(0.15) = -16.5 dB of noise standing
 // no matter how good the model is. Measured on a synthetic drive-by: mix=0.85
@@ -49,7 +49,7 @@ const voiceCleanerFallbackEngine = String(
 function defaultDeepFilterPath() {
   const binaryName = process.platform === 'win32' ? 'deep-filter.exe' : 'deep-filter';
 
-  return path.join(__dirname, '..', 'bin', binaryName);
+  return path.join(__dirname, '..', '..', 'bin', binaryName);
 }
 
 class NoiseReductionError extends Error {

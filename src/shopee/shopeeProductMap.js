@@ -1,5 +1,5 @@
-const { findDimension, findInSection, resolveBoxPrice } = require('./hargaTerbaru');
-const { findAliasRule } = require('./hargaTerbaruAliases');
+const { findDimension, findInSection, resolveBoxPrice } = require('../sheets/hargaTerbaru');
+const { findAliasRule } = require('../sheets/hargaTerbaruAliases');
 
 const BROWN_COLORS = ['cokelat', 'coklat'];
 const TAPE_COLORS = [...BROWN_COLORS, 'biru', 'hijau', 'hitam', 'kuning', 'merah', 'pink', 'putih', 'lainnya'];

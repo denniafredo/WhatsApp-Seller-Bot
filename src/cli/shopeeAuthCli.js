@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const { buildAuthorizeUrl, exchangeAuthCode, TOKEN_PATH } = require('./shopeeClient');
+const { buildAuthorizeUrl, exchangeAuthCode, TOKEN_PATH } = require('../shopee/shopeeClient');
 
 const [code, shopIdOverride] = process.argv.slice(2);
 

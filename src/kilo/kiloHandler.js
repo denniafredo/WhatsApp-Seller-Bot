@@ -5,7 +5,7 @@ const { getKiloCommand, isSupportedImage } = require('./kiloTrigger');
 const { readKiloPhoto } = require('./kiloPhotoReader');
 const { compareKilo } = require('./kiloCompare');
 const { BilasError } = require('./bilasClient');
-const { createProgressReporter } = require('./progressReporter');
+const { createProgressReporter } = require('../shared/progressReporter');
 
 const maxInputMb = Math.min(Math.max(Number(process.env.KILO_MAX_MB) || 12, 1), 32);
 const maxInputBytes = Math.round(maxInputMb * 1024 * 1024);

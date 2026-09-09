@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const { buildImportReport, importShopeePrices } = require('./shopeePriceImport');
+const { buildImportReport, importShopeePrices } = require('../shopee/shopeePriceImport');
 
 importShopeePrices()
   .then((result) => {

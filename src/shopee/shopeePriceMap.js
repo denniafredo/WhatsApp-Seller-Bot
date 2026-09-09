@@ -2,8 +2,8 @@ const {
   applyShopeeReferencePrices,
   getShopeePriceRows,
   updateShopeeMappingColumns,
-} = require('./googleSheets');
-const { loadHargaTerbaru } = require('./hargaTerbaru');
+} = require('../sheets/googleSheets');
+const { loadHargaTerbaru } = require('../sheets/hargaTerbaru');
 const { formatPrice } = require('./shopeePriceSync');
 const { mapShopeeProduct } = require('./shopeeProductMap');
 

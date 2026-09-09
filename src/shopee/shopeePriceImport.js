@@ -1,5 +1,5 @@
-const { replaceShopeePriceRows } = require('./googleSheets');
-const { loadHargaTerbaru } = require('./hargaTerbaru');
+const { replaceShopeePriceRows } = require('../sheets/googleSheets');
+const { loadHargaTerbaru } = require('../sheets/hargaTerbaru');
 const { createShopeeClient } = require('./shopeeClient');
 const { formatSyncTime } = require('./shopeePriceSync');
 const { mapShopeeProduct } = require('./shopeeProductMap');

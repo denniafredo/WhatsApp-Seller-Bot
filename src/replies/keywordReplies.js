@@ -1,6 +1,6 @@
 const path = require('path');
 
-const ASSET_DIR = path.resolve(__dirname, '..', 'assets');
+const ASSET_DIR = path.resolve(__dirname, '..', '..', 'assets');
 
 const replies = [
   {

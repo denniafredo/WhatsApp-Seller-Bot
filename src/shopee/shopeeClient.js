@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.resolve(__dirname, '..', 'data');
+const DATA_DIR = path.resolve(__dirname, '..', '..', 'data');
 const TOKEN_PATH = path.join(DATA_DIR, 'shopee-token.json');
 const AUTH_PATH = '/api/v2/shop/auth_partner';
 const TOKEN_GET_PATH = '/api/v2/auth/token/get';

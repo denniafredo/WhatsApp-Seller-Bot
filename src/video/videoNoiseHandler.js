@@ -4,7 +4,7 @@ const path = require('path');
 
 const { NoiseReductionError, reduceNoise } = require('./videoNoiseReduction');
 const { getNoiseCommand, hasMentions, isSupportedMedia } = require('./videoNoiseTrigger');
-const { createProgressReporter } = require('./progressReporter');
+const { createProgressReporter } = require('../shared/progressReporter');
 
 function readMegabytes(rawValue, fallback) {
   const value = Number(rawValue);

@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const { applyHargaTerbaru, buildMapReport } = require('./shopeePriceMap');
+const { applyHargaTerbaru, buildMapReport } = require('../shopee/shopeePriceMap');
 
 applyHargaTerbaru()
   .then((result) => {

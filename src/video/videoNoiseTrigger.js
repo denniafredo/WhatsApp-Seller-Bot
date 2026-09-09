@@ -1,4 +1,4 @@
-const { normalizeWhatsAppId } = require('./recapMentionReply');
+const { normalizeWhatsAppId } = require('../shared/recapMentionReply');
 
 const supportedTypes = new Set(['video']);
 

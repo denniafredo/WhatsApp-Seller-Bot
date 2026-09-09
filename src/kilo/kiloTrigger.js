@@ -1,7 +1,7 @@
 // Deteksi perintah "cek kilo" beserta parameternya (cabang, rentang tanggal),
 // dan penentuan foto sumber (caption langsung atau reply ke foto).
 
-const { normalizeWhatsAppId } = require('./recapMentionReply');
+const { normalizeWhatsAppId } = require('../shared/recapMentionReply');
 
 const TRIGGER = 'cek kilo';
 const supportedImageTypes = new Set(['image']);
