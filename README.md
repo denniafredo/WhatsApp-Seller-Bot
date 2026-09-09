@@ -65,7 +65,7 @@ Kata pemicunya sekaligus menentukan engine:
 | `lokal` | `deepfilternet` |
 | `bersihkan suara`, `bersihin suara` | ikut `VIDEO_DENOISE_ENGINE` |
 
-Pemetaannya ada di `triggerRules` pada [videoNoiseTrigger.js](src/videoNoiseTrigger.js) — menambah kata pemicu baru atau mengarahkannya ke engine lain cukup satu baris. Frasa terpanjang dicocokkan lebih dulu, jadi `kurangi noise` tidak tertutup oleh aturan `noise`.
+Pemetaannya ada di `triggerRules` pada [videoNoiseTrigger.js](src/video/videoNoiseTrigger.js) — menambah kata pemicu baru atau mengarahkannya ke engine lain cukup satu baris. Frasa terpanjang dicocokkan lebih dulu, jadi `kurangi noise` tidak tertutup oleh aturan `noise`.
 
 Bot membersihkan **noise audio** (desis, hum, AC, kipas, mobil lewat) dengan model AI yang jalan **lokal tanpa cloud**. Video stream di-`copy` tanpa re-encode, jadi **kualitas gambar tidak berubah sama sekali** — terbukti bit-exact lewat perbandingan MD5 stream video input dan output.
 
@@ -113,13 +113,13 @@ VOICECLEANER_HEADLESS=true
 
 `VOICECLEANER_ENHANCEMENT` menerima nama chip lain yang tersedia di situsnya: `Remove Echo`, `Remove Wind Noise`, `Studio Sound`, `Normalize`, `Remove Background Audio`, `Remove Reverb`, dan lain-lain.
 
-**Tiga jebakan yang membuat alur ini gagal secara SENYAP** — ketiganya kena selama pengembangan dan alasannya ditulis sebagai komentar di [voiceCleanerClient.js](src/voiceCleanerClient.js):
+**Tiga jebakan yang membuat alur ini gagal secara SENYAP** — ketiganya kena selama pengembangan dan alasannya ditulis sebagai komentar di [voiceCleanerClient.js](src/video/voiceCleanerClient.js):
 
 1. **Klik elemen terdalam, bukan pembungkus.** UI-nya nol elemen `<button>` — semuanya `div`. Event DOM merambat ke atas, jadi mengklik pembungkus tidak memicu handler anaknya. Pembungkus juga sering memuat dua kontrol sekaligus (`Download Result` + `Upload New File`).
 2. **Kecuali pemicu login dan tombol submit**, yang justru `<button>` asli — di situ strategi terdalam malah memilih `span` dekoratif yang tidak bisa diklik. Tombol submit ada **5 tingkat** di atas kolom password.
 3. **Bukti login bukan munculnya `input[type=file]`.** Input itu baru ada setelah "My Device" diklik, jadi menunggunya akan menggantung walau login sukses. Yang dipakai: hilangnya kolom password.
 
-Kalau alurnya rusak karena situsnya berubah, sunting blok `selectors` di [voiceCleanerClient.js](src/voiceCleanerClient.js) dan jalankan dengan `VOICECLEANER_HEADLESS=false` untuk melihat browsernya.
+Kalau alurnya rusak karena situsnya berubah, sunting blok `selectors` di [voiceCleanerClient.js](src/video/voiceCleanerClient.js) dan jalankan dengan `VOICECLEANER_HEADLESS=false` untuk melihat browsernya.
 
 #### DeepFilterNet
 
@@ -327,7 +327,7 @@ Dipetakan ke section di "Harga Terbaru" seperti ini:
 
 Lalu barisnya dicari dari **ukuran** di nama varian (`120x43x32`). Untuk `73x41x30` yang muncul dua kali, dibedakan pakai kata `Biasa` / `Keras`.
 
-Produk **non-box** (Ice Pack, PE Foam, Lakban, Therma Pack Bag, dll) tidak punya pola, jadi dipetakan lewat aturan eksplisit di [src/hargaTerbaruAliases.js](src/hargaTerbaruAliases.js). Tambah produk baru? Tambah aturan di situ.
+Produk **non-box** (Ice Pack, PE Foam, Lakban, Therma Pack Bag, dll) tidak punya pola, jadi dipetakan lewat aturan eksplisit di [src/sheets/hargaTerbaruAliases.js](src/sheets/hargaTerbaruAliases.js). Tambah produk baru? Tambah aturan di situ.
 
 Aturannya sengaja eksplisit, bukan hasil pencocokan mirip-mirip. Kalau produk baru belum ada aturannya, hasilnya "gagal resolve" (kolom F kosong) — bukan harga salah yang diam-diam ke-push.
 
@@ -405,20 +405,20 @@ Selain variabel bot yang sudah ada:
 | File | Isi |
 |---|---|
 | [src/index.js](src/index.js) | Entry bot WhatsApp |
-| [src/shopeeClient.js](src/shopeeClient.js) | Signature Shopee, auto-refresh token, token store |
-| [src/shopeePriceImport.js](src/shopeePriceImport.js) | Shopee → sheet (`ambil:harga`) |
-| [src/shopeePriceMap.js](src/shopeePriceMap.js) | "Harga Terbaru" → kolom E/F/G → kolom B (`map:harga`) |
-| [src/shopeePriceSync.js](src/shopeePriceSync.js) | Sheet → Shopee (`sync:harga`) |
-| [src/hargaTerbaru.js](src/hargaTerbaru.js) | Parser tab "Harga Terbaru" |
-| [src/hargaTerbaruAliases.js](src/hargaTerbaruAliases.js) | Aturan mapping produk non-box |
-| [src/shopeeProductMap.js](src/shopeeProductMap.js) | Parser nama produk Shopee → section + ukuran |
-| [src/videoNoiseHandler.js](src/videoNoiseHandler.js) | Alur perintah noise reduction: validasi, antrean, balasan |
-| [src/videoNoiseReduction.js](src/videoNoiseReduction.js) | Engine denoise + pemanggilan ffmpeg/ffprobe |
-| [src/videoNoiseTrigger.js](src/videoNoiseTrigger.js) | Deteksi kata pemicu, caption, dan reply |
-| [src/videoJobQueue.js](src/videoJobQueue.js) | Antrean job (concurrency 1) |
-| [src/videoNoiseAbCli.js](src/videoNoiseAbCli.js) | Bandingkan setelan denoise pada satu video (`uji:noise`) |
-| [src/videoNoiseCompareCli.js](src/videoNoiseCompareCli.js) | Bandingkan file hasil dari sumber mana pun (`banding:noise`) |
-| [src/voiceCleanerClient.js](src/voiceCleanerClient.js) | Automation browser ke voicecleaner.ai |
-| [src/progressReporter.js](src/progressReporter.js) | Satu pesan status yang diperbarui per tahap |
-| [src/audioMetrics.js](src/audioMetrics.js) | Pengukuran audio bersama untuk kedua CLI |
-| [src/googleSheets.js](src/googleSheets.js) | Semua akses Google Sheets |
+| [src/shopee/shopeeClient.js](src/shopee/shopeeClient.js) | Signature Shopee, auto-refresh token, token store |
+| [src/shopee/shopeePriceImport.js](src/shopee/shopeePriceImport.js) | Shopee → sheet (`ambil:harga`) |
+| [src/shopee/shopeePriceMap.js](src/shopee/shopeePriceMap.js) | "Harga Terbaru" → kolom E/F/G → kolom B (`map:harga`) |
+| [src/shopee/shopeePriceSync.js](src/shopee/shopeePriceSync.js) | Sheet → Shopee (`sync:harga`) |
+| [src/sheets/hargaTerbaru.js](src/sheets/hargaTerbaru.js) | Parser tab "Harga Terbaru" |
+| [src/sheets/hargaTerbaruAliases.js](src/sheets/hargaTerbaruAliases.js) | Aturan mapping produk non-box |
+| [src/shopee/shopeeProductMap.js](src/shopee/shopeeProductMap.js) | Parser nama produk Shopee → section + ukuran |
+| [src/video/videoNoiseHandler.js](src/video/videoNoiseHandler.js) | Alur perintah noise reduction: validasi, antrean, balasan |
+| [src/video/videoNoiseReduction.js](src/video/videoNoiseReduction.js) | Engine denoise + pemanggilan ffmpeg/ffprobe |
+| [src/video/videoNoiseTrigger.js](src/video/videoNoiseTrigger.js) | Deteksi kata pemicu, caption, dan reply |
+| [src/video/videoJobQueue.js](src/video/videoJobQueue.js) | Antrean job (concurrency 1) |
+| [src/cli/videoNoiseAbCli.js](src/cli/videoNoiseAbCli.js) | Bandingkan setelan denoise pada satu video (`uji:noise`) |
+| [src/cli/videoNoiseCompareCli.js](src/cli/videoNoiseCompareCli.js) | Bandingkan file hasil dari sumber mana pun (`banding:noise`) |
+| [src/video/voiceCleanerClient.js](src/video/voiceCleanerClient.js) | Automation browser ke voicecleaner.ai |
+| [src/shared/progressReporter.js](src/shared/progressReporter.js) | Satu pesan status yang diperbarui per tahap |
+| [src/video/audioMetrics.js](src/video/audioMetrics.js) | Pengukuran audio bersama untuk kedua CLI |
+| [src/sheets/googleSheets.js](src/sheets/googleSheets.js) | Semua akses Google Sheets |
