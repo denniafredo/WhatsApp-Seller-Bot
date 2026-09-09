@@ -204,6 +204,47 @@ Angka dari `banding:noise` **tidak sebanding** dengan angka dari `uji:noise`: ya
 
 ---
 
+## Cek kilo (bandingkan foto catatan karyawan dengan report Bilas)
+
+Kirim **foto catatan tulisan tangan** karyawan (daftar: nama pelanggan, kilo, keterangan) lalu picu dengan perintah `cek kilo`:
+
+- kirim fotonya dengan caption `cek kilo`, atau
+- reply foto yang sudah terkirim lalu tulis `cek kilo`.
+
+Di **grup**, wajib mention bot (`@bot cek kilo ...`). Di **chat pribadi** cukup perintahnya.
+
+Bot membaca angka dari foto dengan **Claude vision (via AWS Bedrock)**, menarik transaksi dari aplikasi **Bilas** untuk rentang tanggal yang diminta, mencocokkan nama pelanggan (toleran terhadap salah baca/gelar), lalu membalas satu tabel: nama, kilo di foto, kilo di Bilas, keterangan, cocok/tidak, dan nomor transaksi.
+
+### Parameter (opsional, urutan bebas)
+
+| Parameter | Contoh | Arti |
+|---|---|---|
+| `cabang:<nama>` | `cabang:sentral` | pilih outlet; default outlet pertama / `BILAS_DEFAULT_OUTLET` |
+| `tgl:<tgl>` | `tgl:2026-09-01` | hanya satu hari |
+| `tgl:<a>..<b>` | `tgl:2026-08-28..2026-09-01` | rentang tanggal |
+| `hari:<n>` | `hari:7` | `n` hari terakhir s/d hari ini |
+
+Tanpa parameter tanggal = **3 hari terakhir s/d hari ini**. Contoh lengkap:
+
+```
+@bot cek kilo cabang:sentral tgl:2026-08-28..2026-09-01
+cek kilo cabang:discount hari:7
+```
+
+### Cara baca hasilnya
+
+- ✅ cocok — selisih kg dalam toleransi (`KILO_TOLERANCE`, default ±0,3 kg; Bilas menyimpan 2 desimal sedangkan tulisan tangan biasanya dibulatkan).
+- ❌ beda kilo — nama ketemu tapi kg di luar toleransi.
+- ❌ tak ada di Bilas — nama di foto tidak ditemukan di transaksi.
+- ⚠️ ragu baca — AI tidak yakin membaca baris itu; cek manual, **bukan** dianggap kebocoran.
+- Bagian **"Ada di Bilas, tidak ada di foto"** menandai transaksi yang tidak tercatat di buku — pola kebocoran yang paling umum.
+
+Balasan hanya memuat nama yang ada di foto (tidak pernah menampilkan seluruh report), dan setiap pemakaian dicatat nomor pengirimnya di log.
+
+Konfigurasi `.env`: `BILAS_USERNAME`, `BILAS_PASSWORD`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `BEDROCK_MODEL_ID`, opsional `BILAS_DEFAULT_OUTLET`, `KILO_TOLERANCE`, `KILO_MAX_MB`. Lihat `.env.example`.
+
+---
+
 # Bagian 2 — Sinkronisasi harga Shopee
 
 ## Alurnya

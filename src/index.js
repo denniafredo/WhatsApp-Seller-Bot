@@ -12,6 +12,8 @@ const { createWelcomeListOptions, createWelcomeMessage, menuItems } = require('.
 const { createWelcomeStore } = require('./welcomeStore');
 const { createJobQueue } = require('./videoJobQueue');
 const { handleNoiseCommand } = require('./videoNoiseHandler');
+const { handleKiloCommand } = require('./kiloHandler');
+const { createBilasClient } = require('./bilasClient');
 
 const sessionName = process.env.WPP_SESSION || 'business-bot';
 const businessPhoneNumber = process.env.BUSINESS_PHONE || '';
@@ -62,6 +64,10 @@ function start(client) {
   // onMessage listeners run concurrently, so this bounds how many ffmpeg
   // processes (and decrypted video buffers) can exist at the same time.
   const videoJobQueue = createJobQueue({ concurrency: 1, maxPending: 5 });
+  // Antrean terpisah supaya cek kilo (vision + API Bilas) tidak saling menghambat
+  // dengan noise reduction video.
+  const kiloJobQueue = createJobQueue({ concurrency: 1, maxPending: 5 });
+  const bilas = createBilasClient();
 
   const getLoggedInWhatsAppIds = async () => {
     if (!loggedInWhatsAppIds) {
@@ -102,6 +108,22 @@ function start(client) {
     if (isGroupMessage(message)) {
       console.log(`Received group message from ${message.from}: "${message.body}".`);
       rememberGroupMessage(groupMessageBuffers, message);
+
+      const kiloHandledGroup = await handleKiloCommand(client, message, {
+        queue: kiloJobQueue,
+        getBotIds: getLoggedInWhatsAppIds,
+        bilas,
+        isGroup: true,
+        timeZone: recapTimeZone,
+      }).catch((error) => {
+        console.error(`Failed to handle cek kilo (group) from ${message.from}:`, error);
+        return false;
+      });
+
+      if (kiloHandledGroup) {
+        return;
+      }
+
       try {
         const botIds = await getLoggedInWhatsAppIds();
         const recapPeriod = getRecapMentionPeriod(message, botIds);
@@ -195,6 +217,23 @@ function start(client) {
     });
 
     if (noiseHandled) {
+      return;
+    }
+
+    // Foto catatan kilo membawa perintahnya di caption; taruh sebelum
+    // getIncomingText agar tidak memicu menu sambutan.
+    const kiloHandled = await handleKiloCommand(client, message, {
+      queue: kiloJobQueue,
+      getBotIds: getLoggedInWhatsAppIds,
+      bilas,
+      isGroup: false,
+      timeZone: recapTimeZone,
+    }).catch((error) => {
+      console.error(`Failed to handle cek kilo from ${message.from}:`, error);
+      return false;
+    });
+
+    if (kiloHandled) {
       return;
     }
 
