@@ -324,6 +324,7 @@ async function applyShopeeReferencePrices(updates) {
 
 module.exports = {
   applyShopeeReferencePrices,
+  getAccessToken,
   getRecapOutput,
   getSheetValues,
   getShopeePriceRows,

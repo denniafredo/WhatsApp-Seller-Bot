@@ -9,6 +9,8 @@
     "map:harga": "node src/cli/shopeePriceMapCli.js",
     "sync:harga": "node src/cli/shopeePriceSyncCli.js",
     "shopee:auth": "node src/cli/shopeeAuthCli.js",
+    "cek:saldo": "node src/cli/shopeeSaldoCli.js",
+    "cek:menu": "node src/cli/shopeeMenuCli.js",
     "uji:noise": "node src/cli/videoNoiseAbCli.js",
     "banding:noise": "node src/cli/videoNoiseCompareCli.js"
   },

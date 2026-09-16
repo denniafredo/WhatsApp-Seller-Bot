@@ -13,7 +13,10 @@ const { createWelcomeStore } = require('./replies/welcomeStore');
 const { createJobQueue } = require('./video/videoJobQueue');
 const { handleNoiseCommand } = require('./video/videoNoiseHandler');
 const { handleKiloCommand } = require('./kilo/kiloHandler');
+const { handleOngkirCommand } = require('./ongkir/ongkirHandler');
+const { handleKeuanganCommand } = require('./keuangan/keuanganHandler');
 const { createBilasClient } = require('./kilo/bilasClient');
+const { config: recapSummaryConfig, sendRecapSummary } = require('./shared/recapSummary');
 
 const sessionName = process.env.WPP_SESSION || 'business-bot';
 const businessPhoneNumber = process.env.BUSINESS_PHONE || '';
@@ -67,6 +70,13 @@ function start(client) {
   // Antrean terpisah supaya cek kilo (vision + API Bilas) tidak saling menghambat
   // dengan noise reduction video.
   const kiloJobQueue = createJobQueue({ concurrency: 1, maxPending: 5 });
+  // Cek ongkir memakai satu emulator Android, jadi tidak boleh ada dua
+  // permintaan yang mengendalikan aplikasi Maxim pada saat bersamaan.
+  const ongkirJobQueue = createJobQueue({ concurrency: 1, maxPending: 5 });
+  // Auto rekap menarik dana Shopee, jadi tidak boleh ada dua yang jalan
+  // bersamaan dan antreannya sengaja pendek: permintaan yang menumpuk di sini
+  // hampir selalu perintah yang diulang, bukan pekerjaan baru.
+  const keuanganJobQueue = createJobQueue({ concurrency: 1, maxPending: 1 });
   const bilas = createBilasClient();
 
   const getLoggedInWhatsAppIds = async () => {
@@ -121,6 +131,34 @@ function start(client) {
       });
 
       if (kiloHandledGroup) {
+        return;
+      }
+
+      const ongkirHandledGroup = await handleOngkirCommand(client, message, {
+        queue: ongkirJobQueue,
+        getBotIds: getLoggedInWhatsAppIds,
+        isGroup: true,
+      }).catch((error) => {
+        console.error(`Failed to handle cek ongkir (group) from ${message.from}:`, error);
+        return false;
+      });
+
+      if (ongkirHandledGroup) {
+        return;
+      }
+
+      const keuanganHandledGroup = await handleKeuanganCommand(client, message, {
+        queue: keuanganJobQueue,
+        getBotIds: getLoggedInWhatsAppIds,
+        isGroup: true,
+        timeZone: recapTimeZone,
+        getGroupBuffer: (chatId) => groupMessageBuffers.get(chatId),
+      }).catch((error) => {
+        console.error(`Failed to handle auto rekap (group) from ${message.from}:`, error);
+        return false;
+      });
+
+      if (keuanganHandledGroup) {
         return;
       }
 
@@ -195,6 +233,28 @@ function start(client) {
               `Jumlah = ${output.cashQuantity}`,
             ].join('\n')
           );
+
+          // Ringkasan ke grup lain sengaja dipisah dari try/catch rekap: rekapnya
+          // sudah masuk sheet dan sudah dibalas, jadi kegagalan mengirim
+          // ringkasan tidak boleh terbaca seperti "rekap gagal".
+          const summary = await sendRecapSummary(client, message, output).catch((error) => {
+            console.error(`Failed to send recap summary to "${recapSummaryConfig.groupName}":`, error);
+            return { sent: false, error };
+          });
+
+          if (summary.error) {
+            await client
+              .sendText(
+                message.from,
+                `Rekap masuk, tapi ringkasan ke grup "${recapSummaryConfig.groupName}" gagal: ${summary.error.message}`
+              )
+              .catch(() => { });
+          } else if (summary.sent) {
+            console.log(`Sent recap summary for ${recap.date} to ${summary.groupId}.`);
+          } else {
+            console.log(`Skipped recap summary for ${recap.date}: ${summary.reason}.`);
+          }
+
           console.log(`Updated recap sheet for ${recap.date} from ${message.from}.`);
         }
       } catch (error) {
@@ -234,6 +294,38 @@ function start(client) {
     });
 
     if (kiloHandled) {
+      return;
+    }
+
+    // Perintah teks biasa, tapi harus di atas getIncomingText supaya tidak
+    // memicu menu sambutan untuk pelanggan baru.
+    const ongkirHandled = await handleOngkirCommand(client, message, {
+      queue: ongkirJobQueue,
+      getBotIds: getLoggedInWhatsAppIds,
+      isGroup: false,
+    }).catch((error) => {
+      console.error(`Failed to handle cek ongkir from ${message.from}:`, error);
+      return false;
+    });
+
+    if (ongkirHandled) {
+      return;
+    }
+
+    // Perintah teks biasa; harus di atas getIncomingText supaya tidak memicu
+    // menu sambutan.
+    const keuanganHandled = await handleKeuanganCommand(client, message, {
+      queue: keuanganJobQueue,
+      getBotIds: getLoggedInWhatsAppIds,
+      isGroup: false,
+      timeZone: recapTimeZone,
+      getGroupBuffer: (chatId) => groupMessageBuffers.get(chatId),
+    }).catch((error) => {
+      console.error(`Failed to handle auto rekap from ${message.from}:`, error);
+      return false;
+    });
+
+    if (keuanganHandled) {
       return;
     }
 

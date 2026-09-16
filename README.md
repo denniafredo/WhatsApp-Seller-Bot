@@ -2,7 +2,7 @@
 
 Dua bagian yang berjalan terpisah:
 
-1. **Bot WhatsApp** (`npm start`) — auto-reply menu, price list, lokasi, pembayaran, dan rekap pesanan ke Google Sheet.
+1. **Bot WhatsApp** (`npm start`) — auto-reply menu, price list, lokasi, pembayaran, rekap pesanan, dan auto rekap pemasukan harian ke Google Sheet.
 2. **Sinkronisasi harga Shopee** (CLI) — tarik produk dari Shopee ke Google Sheet, isi harganya dari tab "Harga Terbaru", lalu push balik ke Shopee.
 
 Bagian 2 **sengaja tidak dipasang di bot WhatsApp**. Ubah harga itu langsung kena pembeli, jadi hanya bisa dijalankan manual dari terminal.
@@ -49,6 +49,28 @@ Di dalam grup, **mention bot** lalu tulis salah satu:
 - `rekap kemarin`
 
 Bot membaca 300 pesan terakhir, mengisi tab "Template pembayaran" di Google Sheet, lalu mengirim balik file rekap + total.
+
+<a id="ringkasan-otomatis-ke-grup-lain"></a>
+### Ringkasan otomatis ke grup lain
+
+Setelah rekap masuk, bot mengirim ringkasannya ke grup **"booot"**:
+
+```
+kulakan yohan: Rp1.227.000
+kas: Rp0
+```
+
+Angkanya sama dengan pesan total di grup pesanan — bedanya cuma tidak tenggelam di antara obrolan order. Nama grup, label, dan tombol matinya ada di `.env`:
+
+| Variabel | Default | Guna |
+|---|---|---|
+| `REKAP_SUMMARY_ENABLED` | `true` | `false` = ringkasan tidak dikirim |
+| `REKAP_SUMMARY_GROUP_NAME` | `booot` | Nama grup tujuan |
+| `REKAP_SUMMARY_GROUP_ID` | kosong | Id grup; menang atas nama kalau diisi |
+| `REKAP_SUMMARY_TOTAL_LABEL` | `kulakan yohan` | Label baris total |
+| `REKAP_SUMMARY_CASH_LABEL` | `kas` | Label baris kas |
+
+Kegagalan mengirim ringkasan **tidak** membatalkan rekap: sheet sudah terisi dan file sudah terkirim, jadi bot cuma menambahkan satu baris pemberitahuan di grup pesanan. Kalau `rekap` kebetulan dijalankan di grup tujuan itu sendiri, ringkasannya dilewati supaya angkanya tidak terkirim dua kali.
 
 ## Noise reduction video
 
@@ -245,6 +267,347 @@ Konfigurasi `.env`: `BILAS_USERNAME`, `BILAS_PASSWORD`, `AWS_REGION`, `AWS_ACCES
 
 ---
 
+## Cek ongkir (tarif pengiriman Maxim)
+
+Ada dua cara pakai. **Bertahap** — kirim `cek ongkir` saja, lalu bot menuntun:
+
+```
+kamu : @bot cek ongkir
+bot  : Cek ongkir — kirim dari mana?
+       1. Dashmall
+       2. Gudang
+kamu : 1
+bot  : Titik jemput: Dashmall. Kirim ke mana?
+kamu : Tlogosari Raya I 65c      (atau link Google Maps)
+bot  : [screenshot tarif + ringkasan harga]
+```
+
+Titik jemput muncul sebagai menu WhatsApp; kalau menu ditolak WhatsApp, bot otomatis mengirim daftar bernomor. Balasannya boleh nomor (`1`) atau nama (`dashmall`). Ketik `batal` untuk berhenti, dan sesi hangus sendiri setelah 10 menit.
+
+**Sekali kirim** — kalau sudah hafal, langsung lengkap dalam satu pesan:
+
+```
+cek ongkir
+dari: dashmall
+ke: Tlogosari Raya I 65c
+```
+
+Di **grup**, mention bot hanya diperlukan untuk memulai (`@bot cek ongkir`); jawaban berikutnya tidak perlu mention, dan hanya balasan dari orang yang memulai yang dibaca. Di **chat pribadi** cukup perintahnya.
+
+Bot menjalankan **aplikasi Maxim di emulator MuMuPlayer** lewat `adb`, mengisi kedua titik, membuka daftar tarif Delivery, lalu membalas **screenshot layar tarif** + ringkasan teks. Satu permintaan memakan waktu sekitar 45 detik dan diantre satu per satu (emulatornya cuma satu).
+
+### Titik asal dan tujuan
+
+| Isian | Contoh | Arti |
+|---|---|---|
+| `dari:` alias | `dari: dashmall` | alias dari `.env` (`ONGKIR_ORIGIN_*`), diterjemahkan jadi kata kunci pencarian |
+| `dari:` / `ke:` alamat | `ke: Tlogosari Raya I 65c` | diketik apa adanya ke pencarian Maxim |
+| `ke:` link Google | `ke: https://maps.app.goo.gl/...` | link dibuka, **nama tempatnya** dipakai jadi kata kunci |
+
+Link Google **tidak** memuat koordinat — yang dipakai hanyalah teks alamat di URL hasil redirect, karena pencarian Maxim memang menerima teks. Alamat dari link dipendekkan lebih dulu (`Jl. Kukilo Mukti Raya No.143, Pedurungan Kidul` → `Kukilo Mukti Raya 143`); bentuk panjang membuat Maxim meleset ke POI lain sekelurahan. Kalau pencarian bentuk pendek gagal, bot mengulang dengan bentuk panjang.
+
+### Cara baca hasilnya
+
+Balasan selalu menyebut **alamat yang benar-benar dipilih Maxim** (`Dari:` / `Ke:`), bukan yang kamu ketik. Cek baris itu dulu: kalau tempatnya bukan yang kamu maksud, harganya juga bukan punya rute yang kamu maksud. Tulis alamat lebih spesifik lalu ulangi.
+
+Harga yang ditampilkan adalah seluruh tarif Delivery yang sedang berlaku: Food&Shop, Bike Delivery (Regular), Bike Delivery (Xpress), dan Car Delivery.
+
+### Uji tanpa WhatsApp
+
+```bash
+node src/cli/ongkirCli.js dashmall "Tlogosari Raya I 65c"
+node src/cli/ongkirCli.js gudang "https://maps.app.goo.gl/..."
+```
+
+Screenshot hasilnya ditulis ke `data/ongkir-terakhir.png`.
+
+### Syarat jalan
+
+- **MuMuPlayer** terpasang dengan aplikasi **Maxim** sudah login. Bot menyalakan emulator sendiri kalau mati (cold start ±80 detik, dibanding ±45 detik kalau emulator sudah hidup), tapi tidak bisa login sendiri.
+- Setelah emulator baru menyala, Maxim menanyakan kota dan menebak **Jakarta** dari GPS emulator. Bot menjawabnya sendiri dengan `MAXIM_CITY` (default Semarang) — kalau dibiarkan terjawab "OK", seluruh tarif dihitung untuk kota yang salah.
+- Bot harus jalan di mesin yang sama dengan emulator (Windows). Fitur ini **tidak** bisa jalan di server Ubuntu.
+- Favorites di aplikasi Maxim tidak dipakai: mengetik nama favorit tidak memunculkannya, dan favorit hanya tampil saat kolom pencarian kosong.
+
+Konfigurasi `.env`: `MUMU_DIR`, `MUMU_VM_INDEX`, `MUMU_BOOT_TIMEOUT_MS`, `MAXIM_PACKAGE`, `MAXIM_CATEGORY`, `MAXIM_CITY`, `ONGKIR_LINK_TIMEOUT_MS`, `ONGKIR_MENU_MODE`, `ONGKIR_SESSION_TTL_MS`, dan alias `ONGKIR_ORIGIN_<NAMA>`. Lihat `.env.example`.
+
+## Auto rekap (pemasukan & pengeluaran harian ke Google Sheet)
+
+Merekap satu hari ke spreadsheet "Shopee Summary", dari **empat sumber**:
+
+| Sumber | Kolom | Ditulis sebagai |
+|---|---|---|
+| Saldo Shopee yang ditarik hari itu | C (Pemasukan) | satu baris `Income Shopee` |
+| `offline <angka>` diketik di grup | C (Pemasukan) | satu baris `Offline` per catatan |
+| Ringkasan rekap yang dikirim bot sendiri ke grup | D (Pengeluaran) | satu baris `Kulakan Yohan` + satu baris `Kas` per hari |
+| `pengeluaran <angka>` diketik di grup | D (Pengeluaran) | satu baris `Pengeluaran` per catatan |
+
+Kulakan dan kas **tidak diketik manual**: angkanya diambil dari dua baris yang dikirim bot sesudah `rekap` (lihat [Ringkasan otomatis ke grup lain](#ringkasan-otomatis-ke-grup-lain)), jadi yang masuk buku keuangan persis angka yang sudah dilihat orang di grup. Kas dihitung pengeluaran karena uangnya dipindahkan ke rekening lain, bukan hilang.
+
+Nominal `Rp0` tidak ditulis — baris kosong tidak mengubah `SUM` apa pun dan cuma memanjangkan blok harian.
+
+### Cara angka dibaca
+
+Angka **tanpa satuan**: kelipatan 1000 dibaca apa adanya, sisanya dikali 1000.
+
+| Ditulis | Dibaca | Kenapa |
+|---|---|---|
+| `offline 105` | Rp105.000 | bukan kelipatan 1000 → ditulis singkat |
+| `offline 1225` | Rp1.225.000 | bukan kelipatan 1000 → ditulis singkat |
+| `offline 85000` | Rp85.000 | kelipatan 1000 → ditulis lengkap |
+| `offline 150.000` | Rp150.000 | kelipatan 1000 → ditulis lengkap |
+| `pengeluaran 9rb` | Rp9.000 | satuan ditulis eksplisit |
+| `offline 12,5rb` | Rp12.500 | koma = desimal |
+
+Dasarnya: orang menulis singkat (`105`, `1225`) atau lengkap (`85000`), dan yang lengkap selalu berakhiran `000`. Ambang tetap seperti "di bawah 1000 = ribuan" tidak bisa membedakan keduanya — `1225` akan jadi Rp1.225.
+
+Yang tersisa ambigu cuma nominal bulat ribuan yang ditulis singkat: `offline 1000` dibaca **Rp1.000**, bukan Rp1 juta. Tulis `1jt` atau `1.000.000` untuk itu.
+
+```
+kamu : @bot auto rekap
+bot  : Auto rekap 15 Sep 2026 diproses, tunggu ya...
+bot  : *Auto rekap — 15 Sep 2026*
+       Tab: September 2026
+
+       Shopee: *Rp1.250.000* (tarik dana berhasil)
+
+       Offline: 3 setoran, total Rp425.000
+         • Ani: Rp150.000 (offline 150)
+         • Budi: Rp200.000 (offline 200rb)
+         • Budi: Rp75.000 (offline 75)
+
+       Pengeluaran:
+         • Kulakan Yohan: *Rp1.227.000* (ditulis di baris 42)
+         • Kas: Rp0 (tidak ditulis)
+         • Budi: Rp9.000 (Pengeluaran 9rb)
+         • Budi: Rp12.000 (pengeluaran 12rb)
+
+       Masuk: *Rp1.675.000*
+       Keluar: *Rp1.248.000*
+       7 baris baru (blok tanggal baru)
+```
+
+Di **grup** wajib mention bot; di **chat pribadi** cukup perintahnya. Perintah ini menarik dana, jadi tidak boleh terpicu obrolan yang kebetulan menyebut "auto rekap".
+
+### Batas hari kerja (rekap lewat tengah malam)
+
+Rekap biasanya dikerjakan setelah tutup, kadang sudah lewat tengah malam. Kalau memakai tanggal kalender, menjalankan `auto rekap` jam 00:30 tanggal 16 akan menulis ke blok tanggal 16 yang masih kosong — padahal seluruh setoran dan saldo yang dimaksud milik tanggal 15.
+
+Jadi jam `00:00` s/d `KEUANGAN_DAY_CUTOFF_HOUR` (default **4**) masih dihitung hari sebelumnya:
+
+| Dijalankan | Blok tanggal | Shopee ditarik? |
+|---|---|---|
+| 15 Sep 21:00 | 15 Sep | ya |
+| 16 Sep 00:30 | **15 Sep** | **ya** — saldonya memang hasil tanggal 15 yang belum ditarik |
+| 16 Sep 03:59 | 15 Sep | ya |
+| 16 Sep 04:00 | 16 Sep | ya |
+
+`KEUANGAN_DAY_CUTOFF_HOUR=0` mematikannya (ikut kalender apa adanya).
+
+Batas ini dipakai di **dua** tempat sekaligus: saat menentukan tanggal target, dan saat memilah pesan grup mana yang termasuk hari itu. Kalau hanya salah satu, pesan jam 00:10 akan jatuh ke hari yang berbeda dari bloknya. Karena itu `auto rekap kemarin` yang dijalankan jam 00:30 tanggal 16 menunjuk tanggal **14**, bukan 15.
+
+Zona waktunya `RECAP_TIMEZONE` (di `.env` sekarang `Asia/Jakarta`).
+
+### Parameter (opsional)
+
+| Isian | Arti |
+|---|---|
+| `auto rekap` | hari ini, Shopee ikut ditarik |
+| `auto rekap kemarin` | tanggal kemarin, Shopee **dilewati** |
+| `auto rekap tgl:2026-09-15` | tanggal tertentu; dilewati Shopee kalau bukan hari ini |
+| `auto rekap tanpa shopee` | hanya setoran offline |
+
+Tarik dana hanya berlaku untuk saldo **saat ini**, jadi merekap tanggal lampau tidak pernah ikut menarik uang — nominalnya sudah bukan saldo hari itu.
+
+### Setoran offline dari grup
+
+Bot menelusuri 500 pesan terakhir (`KEUANGAN_HISTORY_COUNT`) di grup `KEUANGAN_GROUP_NAME` dan mengumpulkan semua yang cocok template `offline <angka>`:
+
+| Ditulis karyawan | Dibaca jadi | Alasan |
+|---|---|---|
+| `offline 150` | Rp150.000 | di bawah 1000 dianggap ribuan |
+| `offline 200rb` | Rp200.000 | satuan eksplisit |
+| `offline 150000` | Rp150.000 | 1000 ke atas dibaca apa adanya |
+| `offline 1,5jt` | Rp1.500.000 | satuan eksplisit |
+| `besok offline ya` | — | tidak ada angka, dilewati |
+
+Satu pesan boleh memuat beberapa setoran (`offline 75 dan offline 25` = dua entri). Pesan yang waktunya tidak terbaca **tidak** ikut dihitung dan jumlahnya dilaporkan di balasan, karena tanpa waktu tidak ada cara memastikan pesan itu milik tanggal yang diminta. Balasan bot sendiri diabaikan — kalau tidak, menjalankan perintah dua kali akan menghitung ringkasannya sebagai setoran baru.
+
+### Bentuk spreadsheetnya: buku jurnal, bukan satu baris per hari
+
+Ini yang menentukan seluruh perilaku penulisan:
+
+```
+A=Tanggal      B=Keterangan     C=Pemasukan    D=Pengeluaran
+14/09/2026     Income Shopee    Rp1.265.759
+               Offline          Rp85.000
+               Offline          Rp45.000
+               Kulakan Yohan                   Rp1.353.000
+15/09/2026     Income Shopee    ...
+```
+
+- Tanggal ditulis **sekali saja**, di baris pertama blok hari itu.
+- Setiap setoran offline punya **barisnya sendiri** — tidak dijumlahkan jadi satu. Begitu juga tiap catatan `pengeluaran`.
+- Kulakan dan kas sebaliknya: **satu baris per hari**. Rekap yang diulang **menimpa** nominalnya, karena rekap terakhir hari itu yang berlaku — bukan menambah baris baru.
+- `F1=SUM(C:C)`, `G1=SUM(D:D)`, `I1=F1-G1` memakai seluruh kolom, jadi baris baru otomatis ikut terhitung dan tidak ada formula yang perlu disentuh.
+- Kolom A sudah berformat `dd/mm/yyyy` dan C/D berformat Rupiah sampai jauh ke bawah, jadi baris baru langsung tampil benar.
+
+Tab-nya **per bulan**, dan namanya tidak selalu konsisten (`September 2026`, tapi `Feb 2026`). Karena itu nama tab **dicocokkan dengan daftar tab sungguhan** berdasarkan bulan + tahun tanggalnya — bukan dirangkai dari nama bulan. Biarkan `KEUANGAN_SHEET_NAME` kosong; mengisinya dengan "September 2026" akan salah tab begitu ganti bulan. Kalau tab bulan berikutnya belum dibuat, bot melapor `TAB_NOT_FOUND` dan tidak menulis apa pun.
+
+### Menjalankan perintah dua kali
+
+Aman, dan memang dirancang untuk itu — setoran biasanya masuk bertahap sepanjang hari:
+
+- **Shopee** — nominalnya sudah tercatat dengan angka sama, jadi tidak ditulis ulang.
+- **Offline & `pengeluaran`** — nominal yang sudah ada di blok hari itu dilewati, hanya catatan baru yang ditambahkan. Perbandingannya per lembar, jadi tiga setoran `Rp41.000` tetap jadi tiga baris.
+- **Kulakan & kas** — kalau nominalnya sama, barisnya tidak disentuh; kalau `rekap` diulang dan angkanya berubah, sel kolom D-nya **ditimpa** di tempat.
+- Kalau tidak ada yang berubah, balasannya **"Sheet tidak berubah — semuanya sudah tercatat"** dan tidak ada satu pun request tulis yang dikirim.
+
+Untuk tanggal lampau yang bloknya ada di tengah, barisnya **disisipkan** (bukan ditambah di bawah) supaya urutan tanggalnya tidak rusak.
+
+### Kenapa Shopee lewat Seller Centre, bukan API
+
+Modul Payment di Shopee Open API v2 hanya baca (`get_wallet_transaction_list`, `get_payout_detail`, `get_escrow_list`, …) — **tidak ada endpoint yang memulai penarikan**. Jadi tahap ini menyetir halaman Seller Centre dengan Puppeteer: buka Saldo Saya → baca "saldo dapat ditarik" → Tarik Dana → isi password → tunggu konfirmasi.
+
+Halaman itu memindahkan uang dan tidak punya kontrak versi, jadi ada tiga pengaman di `src/keuangan/shopeeWithdrawClient.js` yang **jangan dihapus** saat memperbaiki selektor:
+
+1. **Satu penarikan per tanggal.** Hasil penarikan sukses dicatat di `data/keuangan-state.json`. Menjalankan `auto rekap` lagi di hari yang sama memakai nominal tercatat dan tidak menarik ulang.
+2. **Satu penarikan sekaligus.** Antreannya `concurrency: 1, maxPending: 1`, ditambah penjaga di dalam modul, jadi dua perintah bersamaan tidak bisa menarik dua kali.
+3. **Dry run.** `KEUANGAN_DRY_RUN=true` menjalankan seluruh alur tapi tidak pernah menekan Tarik Dana.
+
+Shopee juga dikerjakan lebih dulu daripada penulisan sheet. Kalau penarikan gagal, **tidak ada apa pun yang tertulis** ke spreadsheet — tidak ada angka separuh jadi yang perlu dibersihkan.
+
+### Login pertama kali
+
+Login Seller Centre hampir selalu minta OTP, dan bot tidak bisa membacanya. Jalankan sekali dengan jendela terlihat:
+
+```bash
+SHOPEE_SELLER_HEADLESS=false npm run cek:saldo
+```
+
+Saat `HEADLESS=false`, skrip **tidak mengisi form login sendiri** — dia membuka halaman lalu menunggu kamu login manual (termasuk OTP) sampai `SHOPEE_SELLER_MANUAL_TIMEOUT_MS` (default 5 menit), dan lanjut sendiri begitu kamu sudah masuk. Ini disengaja: kalau skrip ikut mengetik dan men-submit sementara kamu juga sedang login, keduanya saling membatalkan dan navigasinya gagal dengan `net::ERR_ABORTED`.
+
+Sesinya disimpan di `data/shopee-seller-profile`, jadi run berikutnya bisa `HEADLESS=true` tanpa OTP lagi. Kalau sesi habis, bot melapor `SESSION_EXPIRED` dan kamu cukup ulangi langkah di atas.
+
+Perintah yang sama juga dipakai untuk memverifikasi selektor tanpa menarik dana — hasilnya menampilkan nominal yang terbaca beserta teks aslinya:
+
+```
+--- HASIL ---
+Status  : dry-run
+Nominal : Rp1.250.000
+Label   : "Saldo dapat ditarik"
+Teks asli: "Rp1.250.000"
+```
+
+Tambahkan `--tarik` hanya kalau memang ingin menarik dana sungguhan (ada jeda 5 detik untuk membatalkan), dan `--paksa` untuk menembus catatan harian.
+
+### Kalau Shopee minta verifikasi identitas (IVS)
+
+Shopee kadang melempar tantangan verifikasi di **host yang berbeda** (`shopee.co.id/verify/ivs`), bahkan setelah email+kata sandi diterima — dan khususnya saat halaman keuangan diminta. Sebagian akun **hanya** diberi opsi "Verifikasi melalui link", tanpa pilihan kode sama sekali.
+
+Yang menentukan berhasil atau tidak adalah **di mana link itu dibuka**, karena verifikasi menempel pada sesi browser yang membukanya:
+
+1. Tekan "Verifikasi melalui link" di jendela Chrome yang dibuka skrip.
+2. Buka email/WhatsApp, **salin** link verifikasinya.
+3. **Tempel link itu ke address bar jendela Chrome yang dibuka skrip** — jangan diklik langsung.
+
+Kalau link diklik langsung, dia terbuka di browser harianmu. Yang terverifikasi adalah sesi browser itu, bukan profil `data/shopee-seller-profile` milik bot, jadi bot tetap terpantul ke login.
+
+Tahap membuka halaman saldo punya putaran sendiri untuk ini: kalau terpantul ke verifikasi, skrip menunggu kamu menyelesaikannya lalu mencoba lagi, sampai tiga kali. Kalau tetap gagal, errornya `VERIFICATION_REQUIRED`.
+
+Status login juga tidak ditebak dari "tidak ada tanda-tanda login". Dulu `ready` adalah nilai default, sehingga halaman IVS — yang tidak punya kolom password dan URL-nya bukan `/account/signin` — lolos sebagai sukses. Sekarang `ready` hanya diberikan kalau host-nya benar-benar `seller.shopee.*` dan bukan halaman login/verifikasi.
+
+### Label saldo di halaman "Saldo Penjual"
+
+Menu **Keuangan -> Saldo Saya** bermuara di `/portal/finance/wallet/shopeepay`, judulnya "Saldo Penjual". Kartu "Informasi Saldo" memakai label sependek **`Saldo`**, tepat di samping tombol Tarik Dana:
+
+```
+Informasi Saldo
+Saldo
+Rp754.805
+Tarik Dana
+```
+
+Karena "saldo" terlalu umum, pencocokannya **baris persis** (`/^saldo$/i`) — bukan "mengandung kata saldo", yang akan ikut menyambar "Informasi Saldo", "Saldo Penjual", "Saldo Tertahan", atau "Total Saldo".
+
+`selectors.withdrawableLabels` adalah daftar **berurutan**, dicoba dari paling eksplisit ke paling longgar. Urutannya penting dan bukan sekadar alternatif: kalau digabung jadi satu regex, yang menang adalah label yang posisinya paling atas di halaman, sehingga "Total Saldo" berpeluang mengalahkan "Saldo dapat ditarik". Untuk angka uang itu tidak boleh terjadi. Hasil dry run mencetak `Cocok via:` supaya bisa dicek mata, plus peringatan kalau yang cocok cuma label longgar.
+
+Halaman yang sama juga memuat iklan SPinjam berbunyi "dana tunai hingga **Rp1.5 Milyar**". Digitnya saja terbaca `15` — salah delapan digit. Karena itu `parseRupiah` **menolak** nominal yang diikuti satuan kata (milyar/miliar/juta/ribu/rb/jt), bukan mengira-kira: ini jalur uang.
+
+Kalau label saldonya berubah, errornya mendiagnosis sendiri — mencetak setiap nominal yang ada di halaman beserta labelnya:
+
+```
+Label saldo tidak ditemukan di halaman. Nominal yang ADA di halaman:
+  - Saldo => Rp754.805
+  - SPinjam Untuk Penjual => Kembangkan toko Anda dengan dana tunai hingga Rp1.5 Milyar!
+```
+
+### Halaman Saldo Saya terkunci kata sandi
+
+Membuka Saldo Saya kadang memunculkan popup kata sandi — untuk **melihat** saldonya, terpisah dari konfirmasi saat menarik dana. Bot mengisinya sendiri memakai `SHOPEE_SELLER_PASSWORD`. Popupnya tidak selalu muncul; kalau tidak ada, tahap ini dilewati tanpa efek.
+
+Gerbang ini tetap dilewati di mode dry run, karena tanpa itu saldonya tidak bisa dibaca sama sekali. Yang **tidak** dilakukan di dry run tetap sama: tombol Tarik Dana tidak pernah ditekan.
+
+Kalau pengisian otomatis gagal dan jendelanya terlihat (`SHOPEE_SELLER_HEADLESS=false`), skrip menyerahkannya ke kamu — isi popup itu manual, dan skrip lanjut sendiri begitu saldonya tampil. Kalau kata sandinya ditolak, errornya `BALANCE_PASSWORD_REJECTED` dan tidak ada dana yang ditarik.
+
+**Syarat "halaman siap" adalah nominalnya terbaca, bukan judulnya cocok.** Ini pernah jadi bug: judul "Saldo Penjual" tetap ada di latar belakang walau popup kata sandi menutupinya, jadi memakai penanda teks membuat halaman terkunci lolos sebagai siap — dan saldonya lalu terbaca kosong dengan pesan yang menyesatkan ("label tidak ditemukan", padahal sebenarnya terkunci). Urutannya sekarang: periksa gerbang kata sandi dulu, baru tunggu nominalnya muncul. Pesan errornya juga membedakan kedua penyebab itu.
+
+### Mencari URL halaman saldo
+
+URL halaman keuangan Seller Centre tidak boleh ditebak — tebakan yang salah mendarat di `seller.shopee.co.id/404`, dan itu terbaca sebagai "sudah login tapi URL keliru", bukan masalah sesi.
+
+Untuk menemukannya:
+
+```bash
+npm run cek:menu          # pantau 5 menit
+npm run cek:menu -- 10    # pantau 10 menit
+```
+
+Perintah ini memakai sesi yang sudah tersimpan, menyapu semua tautan berbau keuangan di halaman, lalu **memantau perubahan URL**: kamu klik sendiri sampai halaman Saldo Saya terbuka, dan setiap URL baru dicetak di terminal. Cara ini dipakai karena menu Seller Centre banyak yang digerakkan JavaScript tanpa `href` sungguhan, jadi menyapu DOM saja bisa buta.
+
+Salin URL yang benar ke `.env` sebagai `SHOPEE_SELLER_BALANCE_URL`.
+
+### Kenapa navigasinya dicoba ulang
+
+Seller Centre adalah SPA yang sering melakukan redirect sendiri, terutama sesaat setelah login. Kalau `page.goto` kebetulan jalan bersamaan dengan redirect itu, Chrome membatalkan navigasi kita dengan `net::ERR_ABORTED` — padahal halamannya sering tetap sampai ke tujuan. Karena itu semua navigasi lewat `gotoStable`: `waitUntil: domcontentloaded` (dasbor Shopee terus polling, jadi jaringannya praktis tidak pernah idle), cek "apakah sudah mendarat di path yang benar" sebelum menyerah, lalu coba ulang sampai tiga kali.
+
+Status login juga tidak ditebak dari ada/tidaknya kolom password. Halaman OTP juga tidak punya kolom password, jadi cara itu membuat tantangan OTP terbaca sebagai login sukses.
+
+### Alur Tarik Dana dan PIN 6 digit
+
+Ditelusuri dari halaman aslinya:
+
+```
+Saldo Penjual
+  [Tarik Dana]  ->  HALAMAN BARU "Tarik Dana"
+                      Tarik Dana ke        : ShopeePay / rekening bank
+                      Jumlah Penarikan Dana: (sudah terisi)
+                      Biaya transaksi      : Rp0
+                      [Konfirmasi]  ->  POPUP PIN 6 DIGIT
+```
+
+**Kata sandi akun dan PIN penarikan adalah dua hal berbeda.** `SHOPEE_SELLER_PASSWORD` membuka halaman saldo; `SHOPEE_SELLER_WITHDRAW_PIN` menyelesaikan penarikan. Kalau PIN dibiarkan kosong, bot berhenti di popup PIN dan melapor `WITHDRAW_PIN_REQUIRED` — penarikannya **belum** selesai dan harus dituntaskan manual.
+
+Dua pengaman berhenti **sebelum** tombol Konfirmasi ditekan, jadi kalau salah satunya gagal tidak ada apa pun yang terkirim:
+
+| Pengaman | Env | Kalau tidak cocok |
+|---|---|---|
+| Tujuan penarikan | `SHOPEE_SELLER_WITHDRAW_TO` | `WITHDRAW_DESTINATION_MISMATCH` |
+| Nominal di form vs saldo dibaca | — | `WITHDRAW_AMOUNT_MISMATCH` |
+
+Pengaman tujuan itu bukan hiasan: halaman Tarik Dana menawarkan ShopeePay **dan** rekening bank, dan salah tujuan tidak bisa dibatalkan. Kosongkan `SHOPEE_SELLER_WITHDRAW_TO` hanya kalau kamu sengaja mematikan pengaman itu.
+
+Popup PIN ditangani untuk dua bentuk: enam kotak terpisah (digitnya disebar satu-satu) maupun satu kolom (diketik utuh).
+
+Catatan selektor: `pinMarker` memakai `\bpin\b` dengan batas kata. Tanpa itu, `/pin/` polos akan cocok di dalam **"SPinjam Untuk Penjual"** — iklan yang ada di halaman saldo — dan bot mengira popup PIN sudah muncul padahal masih di halaman saldo.
+
+### Kalau penarikan menggantung
+
+Kalau bot melapor **"Tidak ada konfirmasi sukses setelah 120 detik"**, jangan ulangi perintahnya. Timeout bukan berarti gagal — permintaannya bisa sudah terkirim. Cek dulu di Seller Centre, karena catatan harian tidak ditandai sukses pada kasus ini dan perintah berikutnya **akan** menarik lagi.
+
+Konfigurasi `.env`: `KEUANGAN_SHEET_ID`, `KEUANGAN_SHEET_NAME`, `KEUANGAN_SHOPEE_LABEL`, `KEUANGAN_OFFLINE_LABEL`, `KEUANGAN_HEADER_ROWS`, `KEUANGAN_LAST_ROW`, `KEUANGAN_GROUP_NAME`, `KEUANGAN_GROUP_ID`, `KEUANGAN_HISTORY_COUNT`, `KEUANGAN_MAX_WITHDRAW`, `KEUANGAN_DRY_RUN`, `SHOPEE_SELLER_USERNAME`, `SHOPEE_SELLER_PASSWORD`, `SHOPEE_SELLER_BALANCE_URL`, `SHOPEE_SELLER_LOGIN_URL`, `SHOPEE_SELLER_HEADLESS`. Lihat `.env.example`.
+
+---
+
 # Bagian 2 — Sinkronisasi harga Shopee
 
 ## Alurnya
@@ -420,5 +783,16 @@ Selain variabel bot yang sudah ada:
 | [src/cli/videoNoiseCompareCli.js](src/cli/videoNoiseCompareCli.js) | Bandingkan file hasil dari sumber mana pun (`banding:noise`) |
 | [src/video/voiceCleanerClient.js](src/video/voiceCleanerClient.js) | Automation browser ke voicecleaner.ai |
 | [src/shared/progressReporter.js](src/shared/progressReporter.js) | Satu pesan status yang diperbarui per tahap |
+| [src/shared/groupResolver.js](src/shared/groupResolver.js) | Cari id grup dari namanya (dipakai rekap + auto rekap) |
+| [src/shared/recapSummary.js](src/shared/recapSummary.js) | Ringkasan kulakan/kas ke grup "booot" |
 | [src/video/audioMetrics.js](src/video/audioMetrics.js) | Pengukuran audio bersama untuk kedua CLI |
+| [src/keuangan/keuanganHandler.js](src/keuangan/keuanganHandler.js) | Alur "auto rekap": Shopee → grup → sheet → balasan |
+| [src/keuangan/keuanganTrigger.js](src/keuangan/keuanganTrigger.js) | Deteksi perintah "auto rekap" + tanggalnya |
+| [src/keuangan/businessDay.js](src/keuangan/businessDay.js) | Batas hari kerja (rekap lewat tengah malam) |
+| [src/keuangan/offlineParser.js](src/keuangan/offlineParser.js) | Parser `offline <angka>` / `pengeluaran <angka>` dari grup rekap harian |
+| [src/keuangan/pengeluaranParser.js](src/keuangan/pengeluaranParser.js) | Baca kulakan & kas dari ringkasan rekap di grup |
+| [src/keuangan/shopeeWithdrawClient.js](src/keuangan/shopeeWithdrawClient.js) | Automation Seller Centre: baca saldo + tarik dana |
+| [src/keuangan/keuanganSheet.js](src/keuangan/keuanganSheet.js) | Tulis pemasukan harian ke spreadsheet keuangan |
+| [src/cli/shopeeSaldoCli.js](src/cli/shopeeSaldoCli.js) | Cek saldo Shopee / verifikasi selektor (`cek:saldo`) |
+| [src/cli/shopeeMenuCli.js](src/cli/shopeeMenuCli.js) | Cari URL halaman saldo Seller Centre (`cek:menu`) |
 | [src/sheets/googleSheets.js](src/sheets/googleSheets.js) | Semua akses Google Sheets |
