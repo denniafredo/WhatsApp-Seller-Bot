@@ -9,6 +9,8 @@
 // sheet dan tidak ada angka separuh jadi yang perlu dibersihkan.
 
 const { getKeuanganCommand } = require('./keuanganTrigger');
+const { collectAiExpenses } = require('./aiPengeluaranParser');
+const { collectJualanIncome } = require('./jualanParser');
 const { collectManualExpenses, collectOfflineIncome } = require('./offlineParser');
 const { collectRecapExpenses } = require('./pengeluaranParser');
 const {
@@ -63,11 +65,13 @@ function describeFailure(error) {
     case 'WITHDRAW_PIN_MISSING':
     case 'WITHDRAW_PIN_REJECTED':
     case 'WITHDRAW_PIN_INVALID':
+    case 'WITHDRAW_PIN_NOT_FILLED':
       return error.message;
     // Pengaman berhenti sebelum apa pun dikirim, jadi pesannya harus menegaskan
     // itu - kalau tidak, orang akan mengira uangnya sudah bergerak.
     case 'WITHDRAW_FORM_MISSING':
     case 'WITHDRAW_CONFIRM_MISSING':
+    case 'WITHDRAW_CONFIRM_NO_EFFECT':
     case 'WITHDRAW_AMOUNT_UNREADABLE':
     case 'WITHDRAW_AMOUNT_MISMATCH':
     case 'WITHDRAW_DESTINATION_UNKNOWN':
@@ -129,7 +133,26 @@ async function loadGroupMessages(client, groupId, getGroupBuffer) {
   return dedupeMessages([history, buffered]);
 }
 
-function buildReply({ command, shopee, offline, expenses, manualExpenses, sheet }) {
+function describeRowAction(row) {
+  if (row.action === 'updated') {
+    return `baris ${row.row} diperbarui`;
+  }
+  if (row.action === 'unchanged') {
+    return `baris ${row.row} sudah sama`;
+  }
+  return `ditulis di baris ${row.row}`;
+}
+
+function buildReply({
+  command,
+  shopee,
+  offline,
+  expenses,
+  manualExpenses,
+  aiExpenses,
+  jualan,
+  sheet,
+}) {
   const lines = [];
 
   lines.push(`*Auto rekap — ${command.dateLabel}*`);
@@ -170,18 +193,57 @@ function buildReply({ command, shopee, offline, expenses, manualExpenses, sheet 
     lines.push(`  _${sheet.offlineAlreadyThere} setoran sudah ada di sheet, tidak ditulis ulang._`);
   }
 
+  // Penjualan barang dari foto buku. Barisnya di sheet cuma dua (tunai/QRIS),
+  // jadi rinciannya ada di sini - itu satu-satunya tempat salah baca OCR bisa
+  // ketahuan sebelum orang membuka spreadsheet.
+  const jual = jualan || { rows: [], rejected: [], mismatched: [] };
+
+  if (jual.photos || jual.rows.length || (jual.skipped && jual.reason)) {
+    lines.push('');
+    lines.push(`Penjualan barang (${jual.photos || 0} foto buku):`);
+
+    sheet.incomes.forEach((income) => {
+      lines.push(
+        `  • ${income.label}: *${formatRupiah(income.amount)}* _(${describeRowAction(income)})_`
+      );
+    });
+
+    (sheet.incomesZero || []).forEach((income) => {
+      lines.push(`  • ${income.label}: Rp0 _(tidak ditulis)_`);
+    });
+
+    jual.rows.forEach((row) => {
+      lines.push(
+        `    - ${row.barang}: ${formatRupiah(row.amount)} ${row.bayar === 'Q' ? '(QRIS)' : '(tunai)'}` +
+          (row.yakin ? '' : ' ⚠️ _ragu baca_')
+      );
+    });
+
+    if (jual.skipped && jual.reason) {
+      lines.push(`  _pembacaan foto dilewati: ${jual.reason}._`);
+    }
+
+    jual.mismatched.forEach((item) => {
+      lines.push(
+        `  _satu foto dilewati: tanggal di bukunya "${item.tanggal}", bukan ${command.dateLabel}._`
+      );
+    });
+
+    if (jual.rejected.length) {
+      lines.push(`  _${jual.rejected.length} baris buku tidak dipakai (masukkan manual):_`);
+      jual.rejected.slice(0, 5).forEach((item) => {
+        lines.push(`    - ${item.barang} — ${item.reason}`);
+      });
+      if (jual.rejected.length > 5) {
+        lines.push(`    _...dan ${jual.rejected.length - 5} lainnya._`);
+      }
+    }
+  }
+
   lines.push('');
   lines.push('Pengeluaran:');
 
-  const describeExpenseAction = (expense) => {
-    if (expense.action === 'updated') {
-      return `baris ${expense.row} diperbarui`;
-    }
-    if (expense.action === 'unchanged') {
-      return `baris ${expense.row} sudah sama`;
-    }
-    return `ditulis di baris ${expense.row}`;
-  };
+  const describeExpenseAction = describeRowAction;
 
   if (expenses.groupMissing) {
     lines.push(`  _grup ringkasan "${summaryConfig.groupName}" tidak ditemukan, kulakan/kas dilewati._`);
@@ -207,6 +269,39 @@ function buildReply({ command, shopee, offline, expenses, manualExpenses, sheet 
     lines.push(`  • ${entry.author}: ${formatRupiah(entry.amount)} _(${entry.raw})_`);
   });
 
+  // Hasil AI dirinci satu per satu: keterangan yang masuk sheet, nominalnya,
+  // dan kalimat aslinya. Ini yang membuat salah baca langsung kelihatan di grup
+  // dan bisa dikoreksi manual, karena barisnya sudah terlanjur ditulis.
+  const ai = aiExpenses || { entries: [], rejected: [] };
+
+  ai.entries.forEach((entry) => {
+    lines.push(
+      `  • ${entry.keterangan}: ${formatRupiah(entry.amount)}` +
+        ` _(AI, ${entry.author}: "${entry.raw}")_` +
+        (entry.yakin ? '' : ' ⚠️ _ragu_')
+    );
+  });
+
+  if (ai.skipped && ai.reason) {
+    lines.push(`  _pembacaan AI dilewati: ${ai.reason}._`);
+  }
+
+  // Yang ditolak harus kelihatan isinya, bukan cuma jumlahnya: catatan itu
+  // tidak masuk sheet, jadi orang harus tahu apa yang perlu dimasukkan manual.
+  if (ai.rejected && ai.rejected.length) {
+    lines.push(`  _${ai.rejected.length} catatan tidak dipakai (masukkan manual):_`);
+    ai.rejected.slice(0, 5).forEach((item) => {
+      lines.push(`    - "${item.text}" — ${item.reason}`);
+    });
+    if (ai.rejected.length > 5) {
+      lines.push(`    _...dan ${ai.rejected.length - 5} lainnya._`);
+    }
+  }
+
+  if (ai.droppedOverLimit) {
+    lines.push(`  _${ai.droppedOverLimit} pesan lama tidak ikut dinilai AI (batas per run)._`);
+  }
+
   if (sheet.expenseAmountsAlreadyThere) {
     lines.push(
       `  _${sheet.expenseAmountsAlreadyThere} pengeluaran sudah ada di sheet, tidak ditulis ulang._`
@@ -218,6 +313,7 @@ function buildReply({ command, shopee, offline, expenses, manualExpenses, sheet 
   const nothingChanged =
     !sheet.rowsAdded &&
     sheet.shopeeAction !== 'updated' &&
+    !sheet.incomes.some((income) => income.action === 'updated') &&
     !sheet.expenses.some((expense) => expense.action === 'updated');
 
   if (nothingChanged) {
@@ -271,6 +367,45 @@ async function runKeuanganJob(client, message, command, deps, reporter) {
     timeZone: deps.timeZone,
   });
 
+  // --- 2b. Pengeluaran bebas-format, dinilai AI ---
+  // Hanya pesan yang TIDAK cocok pola di atas yang dilempar ke Claude, dan
+  // kegagalannya tidak pernah menggagalkan rekap - pada titik ini dana Shopee
+  // sudah ditarik, jadi berhenti di sini akan meninggalkan uang yang sudah
+  // bergerak tanpa catatan.
+  await reporter.update('Menilai catatan pengeluaran bebas dengan AI...');
+
+  const aiExpenses = await collectAiExpenses(messages, {
+    targetDate: command.targetDate,
+    timeZone: deps.timeZone,
+  }).catch((error) => {
+    console.error('AI pengeluaran gagal:', error.message);
+    return { entries: [], skipped: true, reason: error.message, candidates: 0, rejected: [] };
+  });
+
+  // --- 2c. Penjualan barang dari foto buku tulis tangan ---
+  // Fotonya dikirim ke grup yang sama. AI yang memutuskan foto mana buku
+  // penjualan (foto buku kilo laundry diabaikan), dan hasilnya dijumlahkan per
+  // metode bayar - T (tunai) dan Q (QRIS) - jadi dua baris pemasukan.
+  await reporter.update('Membaca foto buku penjualan...');
+
+  const jualan = await collectJualanIncome(messages, {
+    targetDate: command.targetDate,
+    timeZone: deps.timeZone,
+    decryptFile: (mediaMessage) => client.decryptFile(mediaMessage),
+  }).catch((error) => {
+    console.error('Pembacaan foto jualan gagal:', error.message);
+    return {
+      tunai: 0,
+      qris: 0,
+      rows: [],
+      photos: 0,
+      rejected: [],
+      mismatched: [],
+      skipped: true,
+      reason: error.message,
+    };
+  });
+
   // --- 3. Kulakan & kas dari ringkasan rekap ---
   // Ringkasannya dikirim bot ke grupnya sendiri (REKAP_SUMMARY_GROUP_NAME).
   // Biasanya grup yang sama dengan sumber setoran offline, jadi historynya
@@ -302,19 +437,37 @@ async function runKeuanganJob(client, message, command, deps, reporter) {
     shopeeAmount: shopee.amount,
     shopeeSkipped: shopee.skipped,
     offlineAmounts: offline.entries.map((item) => item.amount),
+    incomes: [
+      { kind: 'jualanTunai', amount: jualan.tunai },
+      { kind: 'jualanQris', amount: jualan.qris },
+    ],
     expenses: expenses.entry
       ? [
           { kind: 'kulakan', amount: expenses.entry.kulakan },
           { kind: 'kas', amount: expenses.entry.kas || 0 },
         ]
       : [],
-    expenseAmounts: manualExpenses.entries.map((item) => item.amount),
+    expenseAmounts: [
+      // Angka polos: keterangannya tetap "Pengeluaran".
+      ...manualExpenses.entries.map((item) => item.amount),
+      // Hasil AI: keterangannya ikut apa yang ditulis orangnya.
+      ...aiExpenses.entries.map((item) => ({ amount: item.amount, keterangan: item.keterangan })),
+    ],
   });
 
-  const reply = buildReply({ command, shopee, offline, expenses, manualExpenses, sheet });
+  const reply = buildReply({
+    command,
+    shopee,
+    offline,
+    expenses,
+    manualExpenses,
+    aiExpenses,
+    jualan,
+    sheet,
+  });
   await client.sendText(message.from, reply);
 
-  return { shopee, offline, expenses, manualExpenses, sheet };
+  return { shopee, offline, expenses, manualExpenses, aiExpenses, jualan, sheet };
 }
 
 async function handleKeuanganCommand(client, message, { queue, getBotIds, isGroup, timeZone, getGroupBuffer }) {

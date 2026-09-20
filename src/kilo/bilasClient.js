@@ -196,6 +196,8 @@ function flattenTransactions(result) {
   for (const day of result.detail || []) {
     for (const trx of day.list || []) {
       rows.push({
+        // `id` dipakai untuk link detail transaksi di web Bilas.
+        id: trx.id,
         noNota: trx.no_nota,
         nama: trx.nama_pelanggan,
         kilo: Number(trx.kiloan) || 0,

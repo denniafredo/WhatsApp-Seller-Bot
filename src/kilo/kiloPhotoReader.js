@@ -11,6 +11,8 @@ class KiloReadError extends Error {
   }
 }
 
+const MAX_NAME_HINTS = 250;
+
 let cachedClient = null;
 
 function getClient(options = {}) {
@@ -36,23 +38,68 @@ function getClient(options = {}) {
   return cachedClient;
 }
 
-const PROMPT = [
+const BASE_PROMPT = [
   'Foto ini adalah catatan tulisan tangan karyawan laundry berisi daftar:',
   'nama pelanggan, berat cucian dalam kilogram (kg), dan keterangan opsional.',
   '',
   'Baca SETIAP baris. Kembalikan HANYA sebuah array JSON, tanpa teks lain,',
   'tanpa blok kode markdown. Tiap elemen:',
-  '{"nama": string, "kilo": number, "keterangan": string, "yakin": boolean}',
+  '{"nama": string, "namaFoto": string, "kilo": number, "keterangan": string, "yakin": boolean}',
   '',
-  'Aturan:',
+  'Aturan nama:',
+  '- "namaFoto": apa adanya seperti tertulis di foto, jangan diperbaiki.',
+  '- "nama": ejaan yang kamu yakini benar (lihat aturan daftar acuan di bawah',
+  '  bila ada; kalau tidak ada, salin saja dari "namaFoto").',
+  '- Huruf tulisan tangan sering tertukar: m/w/n/nn, a/o/u, k/h, y/g, i/l/1,',
+  '  z/2, b/6. Baca nama huruf per huruf, jangan menebak dari kesan sekilas.',
+  '',
+  'Aturan angka:',
   '- "kilo": angka kg sebagai desimal titik. Koma jadi titik (2,8 -> 2.8).',
-  '  Kalau berat tidak tertulis, pakai null.',
-  '- "keterangan": catatan tambahan pada baris itu (mis. express, reguler,',
-  '  cuci saja). Kosongkan dengan "" bila tidak ada.',
-  '- "yakin": false bila tulisan pada baris itu sulit/ragu dibaca, true bila jelas.',
+  '  Kalau berat tidak tertulis (mis. hanya "1 celana", "1 satuan"), pakai null.',
+  '- Setiap baris punya angkanya SENDIRI. Jangan menyalin angka dari baris di',
+  '  atas atau di bawahnya; telusuri garis barisnya dari nama ke kolom angka.',
+  '- Digit yang mirip pada tulisan tangan: 8 vs 0 vs 6, 3 vs 5 vs 8, 1 vs 7,',
+  '  4 vs 9. Perhatikan lebar angkanya (mis. 8,9 sering terlihat seperti 0,9).',
+  '- Angka kg laundry rumahan biasanya 1-20 kg; curigai bacaanmu bila di luar itu.',
+  '',
+  'Aturan lain:',
+  '- "keterangan": catatan tambahan pada baris itu (mis. jumlah potong, express,',
+  '  reguler, sprei, setrika). Kosongkan dengan "" bila tidak ada.',
+  '- "yakin": false bila nama ATAU angka pada baris itu ragu dibaca, true bila jelas.',
   '- Abaikan baris judul, total, atau tanda tangan yang bukan data pelanggan.',
-  '- Jangan mengarang baris yang tidak ada di foto.',
+  '- Jangan mengarang baris yang tidak ada di foto, dan jangan melewatkan baris.',
 ].join('\n');
+
+// Daftar nama pelanggan dari aplikasi untuk periode yang sama. Ini penyaring
+// terkuat: tulisan tangan yang ambigu ("2alk kenid") jadi punya kandidat nyata
+// ("Zaky Kendal") ketimbang ditebak bebas oleh model.
+function buildNameHint(knownNames) {
+  const unique = [...new Set((knownNames || []).map((n) => String(n || '').trim()).filter(Boolean))];
+  if (!unique.length) return '';
+
+  const listed = unique.slice(0, MAX_NAME_HINTS);
+  const lines = [
+    '',
+    'DAFTAR NAMA PELANGGAN DI APLIKASI untuk periode ini:',
+    ...listed.map((name) => `- ${name}`),
+    '',
+    'Pakai daftar itu sebagai acuan ejaan:',
+    '- Bila bacaanmu jelas merujuk salah satu nama di daftar (beda 1-3 huruf,',
+    '  huruf tertukar, atau nama disingkat), tulis ejaan dari daftar di "nama".',
+    '- Bila tidak ada yang mirip, salin bacaan aslimu ke "nama". JANGAN memaksa',
+    '  memilih nama dari daftar hanya karena mirip sedikit.',
+    '- "namaFoto" tetap bacaan mentah dari foto, apa pun isinya.',
+  ];
+  if (unique.length > listed.length) {
+    lines.push(`(Daftar dipotong ${listed.length} dari ${unique.length} nama.)`);
+  }
+  return lines.join('\n');
+}
+
+function buildPrompt(knownNames) {
+  const hint = buildNameHint(knownNames);
+  return hint ? `${BASE_PROMPT}\n${hint}` : BASE_PROMPT;
+}
 
 function extractJsonArray(text) {
   const start = text.indexOf('[');
@@ -78,9 +125,10 @@ function coerceKilo(value) {
 /**
  * @param imageBase64  base64 gambar (tanpa prefix data:)
  * @param mediaType    mis. "image/jpeg" | "image/png"
- * @returns [{ nama, kilo, keterangan, yakin }]
+ * @param knownNames   nama pelanggan dari Bilas untuk periode yang sama (acuan ejaan)
+ * @returns [{ nama, namaFoto, kilo, keterangan, yakin }]
  */
-async function readKiloPhoto({ imageBase64, mediaType = 'image/jpeg' }, options = {}) {
+async function readKiloPhoto({ imageBase64, mediaType = 'image/jpeg', knownNames = [] }, options = {}) {
   const client = getClient(options);
   const model = options.model || process.env.BEDROCK_MODEL_ID;
   if (!model) {
@@ -97,7 +145,7 @@ async function readKiloPhoto({ imageBase64, mediaType = 'image/jpeg' }, options 
           role: 'user',
           content: [
             { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-            { type: 'text', text: PROMPT },
+            { type: 'text', text: buildPrompt(knownNames) },
           ],
         },
       ],
@@ -118,13 +166,17 @@ async function readKiloPhoto({ imageBase64, mediaType = 'image/jpeg' }, options 
   }
 
   return parsed
-    .map((row) => ({
-      nama: String(row.nama || '').trim(),
-      kilo: coerceKilo(row.kilo),
-      keterangan: String(row.keterangan || '').trim(),
-      yakin: row.yakin !== false,
-    }))
+    .map((row) => {
+      const namaFoto = String(row.namaFoto || row.nama || '').trim();
+      return {
+        nama: String(row.nama || namaFoto).trim(),
+        namaFoto,
+        kilo: coerceKilo(row.kilo),
+        keterangan: String(row.keterangan || '').trim(),
+        yakin: row.yakin !== false,
+      };
+    })
     .filter((row) => row.nama || row.kilo != null);
 }
 
-module.exports = { readKiloPhoto, KiloReadError };
+module.exports = { readKiloPhoto, buildPrompt, KiloReadError };

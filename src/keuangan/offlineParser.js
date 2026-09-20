@@ -15,9 +15,26 @@
 //
 // Yang tetap ambigu cuma angka bulat ribuan yang ditulis singkat: "offline
 // 1000" dibaca Rp1.000, bukan Rp1 juta. Tulis "1jt" atau "1.000.000" untuk itu.
+//
+// Perkalian seribu itu HANYA untuk singkatan. Nominal yang sudah ditulis penuh
+// dibaca apa adanya, dikenali dari dua tanda:
+//
+//   Rp1.184.500 -> Rp1.184.500   (pakai pemisah ribuan, bukan 1,18 miliar)
+//   150500      -> Rp150.500     (enam digit; singkatan tidak pernah sepanjang
+//                                 itu, artinya akan jadi Rp150,5 juta)
+//
+// Tanpa keduanya "kulakan yohan Rp1.184.500" - yang dibaca AI pengeluaran -
+// masuk buku seribu kali lipat, karena 1.184.500 bukan kelipatan 1000.
 const { businessYmd } = require('./businessDay');
+const { isBotGeneratedMessage } = require('../shared/botOutput');
 
 const RIBUAN_UNIT = 1000;
+
+// Batas nominal yang dianggap sudah ditulis penuh walau tanpa pemisah ribuan.
+const NOMINAL_PENUH_MIN = 100000;
+
+// "1.184.500": ada titik, dan setiap titik diikuti tepat tiga angka.
+const POLA_PEMISAH_RIBUAN = /^\d{1,3}(?:\.\d{3})+$/;
 
 // Labelnya boleh diikuti titik dua/spasi, lalu angka dengan pemisah ribuan
 // gaya Indonesia (titik) dan satuan opsional (rb/ribu/k/jt/juta). Ekornya
@@ -30,7 +47,12 @@ const RIBUAN_UNIT = 1000;
 //     daftar nominal di baris berikutnya terbaca sebagai satu catatan.
 //   - Angkanya ditangkap RAKUS sampai kelompok ribuan terakhir. Versi malas
 //     berhenti di pemisah pertama, jadi "offline 1.225.000" cuma terbaca "1".
-const AMOUNT_TAIL = /[ \t]*[:=]?[ \t]*(?:rp\.?[ \t]*)?(\d[\d.]*\d|\d)(?:,(\d+))?[ \t]*(rb|ribu|k|jt|juta)?(?=\b|$)/;
+//   - Metode bayar boleh menyela antara label dan angkanya ("offline tunai
+//     56"), tapi hanya kata dari daftar tertutup di bawah. Menerima kata apa
+//     pun akan membuat kalimat seperti "offline belum ada 3 setoran" ikut
+//     terbaca sebagai nominal.
+const AMOUNT_TAIL =
+  /[ \t]*[:=]?[ \t]*(?:(?:tunai|cash|qris|qr|transfer|tf|debit|gopay|ovo|dana|shopeepay)\b[ \t]*[:=]?[ \t]*)?(?:rp\.?[ \t]*)?(\d[\d.]*\d|\d)(?:,(\d+))?[ \t]*(rb|ribu|k|jt|juta)?(?=\b|$)/;
 
 function createAmountPattern(labelSource) {
   return new RegExp(String.raw`\b${labelSource}\b` + AMOUNT_TAIL.source, 'gi');
@@ -54,19 +76,37 @@ function getMessageTimestampMs(message) {
 
 
 
-// "150.000" -> 150000, "150,5" -> 150.5. Titik dipakai sebagai pemisah ribuan
-// di Indonesia, jadi hanya koma yang diperlakukan sebagai desimal.
-function parseIndonesianNumber(rawDigits) {
+// "150.000" -> 150000, "150,5" -> 150.5. Di Indonesia titik adalah pemisah
+// ribuan, jadi hanya koma yang pasti desimal.
+//
+// Titik baru dihitung pemisah ribuan kalau SETIAP titik diikuti tepat tiga
+// angka. Kalau tidak - "1.5jt" - titik terakhirnya yang jadi desimal; membuang
+// titik di situ membuat "1.5jt" terbaca 15 juta.
+//
+// options.dotsAsThousands memaksa aturan lama (semua titik dibuang) untuk
+// sumber yang nominalnya dijamin ditulis penuh, seperti buku jualan.
+function parseIndonesianNumber(rawDigits, options = {}) {
   const cleaned = String(rawDigits).replace(/\s+/g, '');
   const commaIndex = cleaned.lastIndexOf(',');
 
-  if (commaIndex === -1) {
+  if (commaIndex !== -1) {
+    const whole = cleaned.slice(0, commaIndex).replace(/\./g, '');
+    const fraction = cleaned.slice(commaIndex + 1).replace(/\D/g, '');
+    return Number(`${whole || '0'}.${fraction || '0'}`);
+  }
+
+  if (
+    !cleaned.includes('.') ||
+    options.dotsAsThousands === true ||
+    POLA_PEMISAH_RIBUAN.test(cleaned)
+  ) {
     const digitsOnly = cleaned.replace(/\./g, '');
     return digitsOnly ? Number(digitsOnly) : NaN;
   }
 
-  const whole = cleaned.slice(0, commaIndex).replace(/\./g, '');
-  const fraction = cleaned.slice(commaIndex + 1).replace(/\D/g, '');
+  const dotIndex = cleaned.lastIndexOf('.');
+  const whole = cleaned.slice(0, dotIndex).replace(/\./g, '');
+  const fraction = cleaned.slice(dotIndex + 1).replace(/\D/g, '');
   return Number(`${whole || '0'}.${fraction || '0'}`);
 }
 
@@ -75,7 +115,8 @@ function parseIndonesianNumber(rawDigits) {
  * @returns { amount, scale } atau null bila tidak bisa dibaca.
  */
 function toRupiah(rawDigits, unit) {
-  const base = parseIndonesianNumber(rawDigits);
+  const cleaned = String(rawDigits).replace(/\s+/g, '');
+  const base = parseIndonesianNumber(cleaned);
   if (!Number.isFinite(base) || base <= 0) {
     return null;
   }
@@ -90,7 +131,13 @@ function toRupiah(rawDigits, unit) {
     return { amount: Math.round(base * 1000), scale: 'ribu-eksplisit' };
   }
 
-  // Satuan tidak ditulis: kelipatan 1000 berarti nominalnya sudah lengkap.
+  // Satuan tidak ditulis. Nominalnya dianggap sudah lengkap bila dipisah titik
+  // ribuan ("1.184.500"), enam digit ke atas ("150500"), atau kelipatan 1000
+  // ("85000") - ketiganya tanda tulisan penuh, bukan singkatan.
+  if (POLA_PEMISAH_RIBUAN.test(cleaned) || base >= NOMINAL_PENUH_MIN) {
+    return { amount: Math.round(base), scale: 'apa-adanya' };
+  }
+
   if (Number.isInteger(base) && base % RIBUAN_UNIT === 0) {
     return { amount: base, scale: 'apa-adanya' };
   }
@@ -98,13 +145,21 @@ function toRupiah(rawDigits, unit) {
   return { amount: Math.round(base * RIBUAN_UNIT), scale: 'ribu-implisit' };
 }
 
+// Nama penulis untuk ditampilkan di balasan.
+//
+// Pesan yang dikirim dari akun bot sendiri sering tidak punya `author`, dan
+// `from`-nya adalah id GRUP - kalau dipakai apa adanya, balasannya akan
+// menyebut id grup sebagai nama orang. Id grup dibuang, dan sisanya diberi
+// label jelas supaya kelihatan catatan itu ditulis dari HP akun bot.
 function getAuthorLabel(message) {
-  const author =
-    message?.author ||
-    message?.from ||
-    message?.sender?.id?._serialized ||
-    message?.sender?.id ||
-    '';
+  const author = [
+    message?.author,
+    message?.sender?.id?._serialized,
+    message?.sender?.id,
+    message?.from,
+  ]
+    .map((value) => String(value?._serialized || value || ''))
+    .find((value) => value && !value.endsWith('@g.us'));
   const name =
     message?.sender?.pushname ||
     message?.sender?.name ||
@@ -112,8 +167,12 @@ function getAuthorLabel(message) {
     message?.pushname ||
     '';
 
-  const phone = String(author?._serialized || author || '').split('@')[0];
-  return name || phone || '(tanpa nama)';
+  const phone = String(author || '').split('@')[0];
+  if (name || phone) {
+    return name || phone;
+  }
+
+  return message?.fromMe ? '(akun bot)' : '(tanpa nama)';
 }
 
 /**
@@ -134,9 +193,11 @@ function collectLabeledAmounts(messages, options = {}) {
   let skippedNoTimestamp = 0;
 
   (messages || []).forEach((message) => {
-    // Balasan bot sendiri memuat ringkasan yang juga berisi kata "offline";
-    // memasukkannya akan menggandakan total tiap kali perintah diulang.
-    if (message?.fromMe) {
+    // Yang dibuang cuma balasan bot: ringkasannya memuat kata "offline" juga,
+    // jadi membacanya lagi menggandakan total tiap kali perintah diulang.
+    // Catatan yang diketik ORANG lewat akun bot (fromMe juga) tetap dihitung -
+    // setoran memang sering ditulis dari HP yang login sebagai bot.
+    if (isBotGeneratedMessage(message)) {
       return;
     }
 
@@ -210,6 +271,7 @@ function collectManualExpenses(messages, options = {}) {
 module.exports = {
   RIBUAN_UNIT,
   collectLabeledAmounts,
+  getAuthorLabel,
   collectManualExpenses,
   collectOfflineIncome,
   createAmountPattern,

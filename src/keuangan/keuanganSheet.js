@@ -48,6 +48,10 @@ function getLayout() {
     kulakanLabel: process.env.KEUANGAN_KULAKAN_LABEL || 'Kulakan Yohan',
     kasLabel: process.env.KEUANGAN_KAS_LABEL || 'Kas',
     pengeluaranLabel: process.env.KEUANGAN_PENGELUARAN_LABEL || 'Pengeluaran',
+    // Penjualan barang dari foto buku tulis tangan, dijumlahkan per metode
+    // bayar (kolom T/Q di bukunya).
+    jualanTunaiLabel: process.env.KEUANGAN_JUALAN_TUNAI_LABEL || 'Penjualan Tunai',
+    jualanQrisLabel: process.env.KEUANGAN_JUALAN_QRIS_LABEL || 'Penjualan QRIS',
     headerRows: readInt(process.env.KEUANGAN_HEADER_ROWS, 1),
     maxRows: readInt(process.env.KEUANGAN_LAST_ROW, 1000),
   };
@@ -247,6 +251,22 @@ function getExpenseLabel(layout, kind) {
   return kind === 'kas' ? layout.kasLabel : layout.kulakanLabel;
 }
 
+// Pemasukan berjenis tetap: satu baris per hari per jenis, DITIMPA kalau
+// nominalnya berubah - sama seperti kulakan/kas, dan berbeda dari setoran
+// offline yang satu catatan = satu baris. Fotonya bisa dikirim ulang setelah
+// ada tambahan penjualan, dan yang benar adalah total terakhir hari itu, bukan
+// penjumlahan foto pertama dengan foto kedua.
+function getIncomeKinds(layout) {
+  return [
+    { kind: 'jualanTunai', label: layout.jualanTunaiLabel },
+    { kind: 'jualanQris', label: layout.jualanQrisLabel },
+  ];
+}
+
+function getIncomeLabel(layout, kind) {
+  return kind === 'jualanQris' ? layout.jualanQrisLabel : layout.jualanTunaiLabel;
+}
+
 function getExpenseKinds(layout) {
   return [
     { kind: 'kulakan', label: layout.kulakanLabel },
@@ -285,7 +305,7 @@ function findDayBlock(ledger, layout, targetYmd) {
   const blockRows = rows.filter((row) => row.row >= startRow && row.row <= endRow);
   const shopeeLabel = normalizeLabel(layout.shopeeLabel);
   const offlineLabel = normalizeLabel(layout.offlineLabel);
-  const pengeluaranLabel = normalizeLabel(layout.pengeluaranLabel);
+  const fixedExpenseLabels = getExpenseKinds(layout).map(({ label }) => normalizeLabel(label));
 
   return {
     startRow,
@@ -304,10 +324,56 @@ function findDayBlock(ledger, layout, targetYmd) {
       }
       return found;
     }, {}),
+    // Pengeluaran lepas: dulu hanya baris berlabel "Pengeluaran", sekarang
+    // keterangannya bebas ("beli lakban shopee"), jadi yang dipakai sebagai
+    // penanda adalah kolom D terisi DAN labelnya bukan jenis tetap
+    // (kulakan/kas). Tanpa ini, baris hasil AI tidak dikenali saat auto rekap
+    // diulang dan akan ditulis dua kali.
+    fixedIncomeRows: getIncomeKinds(layout).reduce((found, { kind, label }) => {
+      const match = blockRows.find((row) => normalizeLabel(row.label) === normalizeLabel(label));
+      if (match) {
+        found[kind] = { row: match.row, amount: parseAmount(match.income) };
+      }
+      return found;
+    }, {}),
     manualExpenseRows: blockRows
-      .filter((row) => normalizeLabel(row.label) === pengeluaranLabel)
-      .map((row) => ({ row: row.row, amount: parseAmount(row.expense) })),
+      .filter((row) => {
+        const label = normalizeLabel(row.label);
+        if (!label || fixedExpenseLabels.includes(label)) {
+          return false;
+        }
+        return parseAmount(row.expense) > 0;
+      })
+      .map((row) => ({ row: row.row, amount: parseAmount(row.expense), label: row.label || '' })),
   };
+}
+
+// Sama seperti diffOfflineAmounts, tapi kuncinya keterangan + nominal.
+// Pengeluaran lepas sekarang berketerangan bebas, jadi "bensin 50.000" dan
+// "ice pack 50.000" pada hari yang sama adalah dua baris berbeda - membandingkan
+// nominal saja akan menganggap yang kedua sudah tertulis.
+function diffLabeledExpenses(newItems, existingItems) {
+  const keyOf = (item) => `${normalizeLabel(item.label)}|${item.amount}`;
+  const remaining = new Map();
+
+  existingItems.forEach((item) => {
+    const key = keyOf(item);
+    remaining.set(key, (remaining.get(key) || 0) + 1);
+  });
+
+  const toAdd = [];
+
+  newItems.forEach((item) => {
+    const key = keyOf(item);
+    const available = remaining.get(key) || 0;
+    if (available > 0) {
+      remaining.set(key, available - 1);
+      return;
+    }
+    toAdd.push(item);
+  });
+
+  return toAdd;
 }
 
 // Selisih multiset: nominal yang belum ada di sheet. Menjalankan perintah dua
@@ -398,15 +464,31 @@ async function writeDailyLedger(entry) {
     Math.max(Number(amount) || 0, 0)
   );
   const writeShopee = !entry.shopeeSkipped && shopeeAmount > 0;
+  // Pemasukan berjenis tetap (penjualan tunai/QRIS dari foto buku). Nol tidak
+  // ditulis, sama seperti kulakan/kas yang Rp0.
+  const incomes = (entry.incomes || [])
+    .map((income) => ({ kind: income.kind, amount: Math.max(Number(income.amount) || 0, 0) }))
+    .filter((income, index, list) => list.findIndex((item) => item.kind === income.kind) === index);
+  const incomesToWrite = incomes.filter((income) => income.amount > 0);
   // Nol tidak ditulis: baris Rp0 tidak mengubah SUM apa pun dan cuma
   // memanjangkan blok harian. Yang dilewati dilaporkan lewat expensesZero.
   const expenses = (entry.expenses || [])
     .map((expense) => ({ kind: expense.kind, amount: Math.max(Number(expense.amount) || 0, 0) }))
     .filter((expense, index, list) => list.findIndex((item) => item.kind === expense.kind) === index);
   const expensesToWrite = expenses.filter((expense) => expense.amount > 0);
+  // Pengeluaran lepas boleh ditulis dua cara:
+  //   - angka polos           -> keterangannya label tetap ("Pengeluaran")
+  //   - { amount, keterangan } -> keterangannya apa yang ditulis orangnya
+  // Bentuk kedua yang dipakai hasil pembacaan AI ("beli lakban shopee"), dan
+  // bentuk pertama dipertahankan supaya "pengeluaran 9rb" tetap jalan.
   const expenseAmounts = (entry.expenseAmounts || [])
-    .map((amount) => Math.max(Number(amount) || 0, 0))
-    .filter((amount) => amount > 0);
+    .map((item) => {
+      const amount = Math.max(Number(typeof item === 'object' ? item?.amount : item) || 0, 0);
+      const keterangan =
+        typeof item === 'object' ? String(item?.keterangan || item?.label || '').trim() : '';
+      return { amount, label: keterangan || layout.pengeluaranLabel };
+    })
+    .filter((item) => item.amount > 0);
 
   const tab = await resolveTab(layout, entry.date);
   const ledger = await readLedger(layout, tab.title);
@@ -421,6 +503,10 @@ async function writeDailyLedger(entry) {
     shopeeRow: null,
     offlineAdded: [],
     offlineAlreadyThere: 0,
+    incomes: [],
+    incomesZero: incomes
+      .filter((income) => income.amount <= 0)
+      .map((income) => ({ kind: income.kind, label: getIncomeLabel(layout, income.kind) })),
     expenses: [],
     expensesZero: expenses
       .filter((expense) => expense.amount <= 0)
@@ -441,6 +527,10 @@ async function writeDailyLedger(entry) {
     if (writeShopee) {
       newRows.push(['', layout.shopeeLabel, shopeeAmount, '']);
     }
+    const incomeStartIndex = newRows.length;
+    incomesToWrite.forEach((income) => {
+      newRows.push(['', getIncomeLabel(layout, income.kind), income.amount, '']);
+    });
     offlineAmounts.forEach((amount) => {
       newRows.push(['', layout.offlineLabel, amount, '']);
     });
@@ -448,8 +538,8 @@ async function writeDailyLedger(entry) {
     expensesToWrite.forEach((expense) => {
       newRows.push(['', getExpenseLabel(layout, expense.kind), '', expense.amount]);
     });
-    expenseAmounts.forEach((amount) => {
-      newRows.push(['', layout.pengeluaranLabel, '', amount]);
+    expenseAmounts.forEach((item) => {
+      newRows.push(['', item.label, '', item.amount]);
     });
 
     if (!newRows.length) {
@@ -470,6 +560,13 @@ async function writeDailyLedger(entry) {
     summary.shopeeAction = writeShopee ? 'added' : 'skip';
     summary.shopeeRow = writeShopee ? startRow : null;
     summary.offlineAdded = offlineAmounts;
+    summary.incomes = incomesToWrite.map((income, index) => ({
+      kind: income.kind,
+      label: getIncomeLabel(layout, income.kind),
+      amount: income.amount,
+      row: startRow + incomeStartIndex + index,
+      action: 'added',
+    }));
     summary.expenses = expensesToWrite.map((expense, index) => ({
       kind: expense.kind,
       label: getExpenseLabel(layout, expense.kind),
@@ -480,21 +577,21 @@ async function writeDailyLedger(entry) {
     summary.expenseAmountsAdded = expenseAmounts;
     summary.expenseTotal =
       expensesToWrite.reduce((sum, expense) => sum + expense.amount, 0) +
-      expenseAmounts.reduce((sum, amount) => sum + amount, 0);
+      expenseAmounts.reduce((sum, item) => sum + item.amount, 0);
     summary.rowsAdded = newRows.length;
     summary.startRow = startRow;
     summary.endRow = startRow + newRows.length - 1;
-    summary.total = (writeShopee ? shopeeAmount : 0) + offlineAmounts.reduce((a, b) => a + b, 0);
+    summary.total =
+      (writeShopee ? shopeeAmount : 0) +
+      offlineAmounts.reduce((a, b) => a + b, 0) +
+      incomesToWrite.reduce((sum, income) => sum + income.amount, 0);
     return summary;
   }
 
   // --- Blok sudah ada: perbarui Shopee, tambahkan offline yang belum ada ---
   const existingOffline = block.offlineRows.map((row) => row.amount);
   const offlineToAdd = diffOfflineAmounts(offlineAmounts, existingOffline);
-  const expenseAmountsToAdd = diffOfflineAmounts(
-    expenseAmounts,
-    block.manualExpenseRows.map((row) => row.amount)
-  );
+  const expenseAmountsToAdd = diffLabeledExpenses(expenseAmounts, block.manualExpenseRows);
 
   summary.offlineAlreadyThere = offlineAmounts.length - offlineToAdd.length;
   summary.expenseAmountsAlreadyThere = expenseAmounts.length - expenseAmountsToAdd.length;
@@ -521,6 +618,29 @@ async function writeDailyLedger(entry) {
     }
   }
 
+  // Pemasukan tetap (penjualan tunai/QRIS): satu baris per jenis, ditimpa
+  // kalau nominalnya berubah. Foto buku yang dikirim ulang setelah ada
+  // tambahan penjualan karena itu memperbarui barisnya, bukan menambah baris
+  // kedua yang membuat pemasukan hari itu terhitung dua kali.
+  const incomesPending = [];
+  incomesToWrite.forEach((income) => {
+    const label = getIncomeLabel(layout, income.kind);
+    const existing = block.fixedIncomeRows[income.kind];
+
+    if (!existing) {
+      incomesPending.push({ ...income, label });
+      return;
+    }
+
+    if (existing.amount === income.amount) {
+      summary.incomes.push({ ...income, label, row: existing.row, action: 'unchanged' });
+      return;
+    }
+
+    data.push({ range: `'${tab.title}'!C${existing.row}`, values: [[income.amount]] });
+    summary.incomes.push({ ...income, label, row: existing.row, action: 'updated' });
+  });
+
   // Pengeluaran: satu baris per jenis. Kalau barisnya sudah ada, nominalnya
   // ditimpa - rekap terakhir hari itu yang berlaku, bukan penjumlahan.
   const expensesPending = [];
@@ -546,6 +666,10 @@ async function writeDailyLedger(entry) {
   if (writeShopee && !block.shopeeRow) {
     rowsToAdd.push(['', layout.shopeeLabel, shopeeAmount, '']);
   }
+  const incomeStartIndex = rowsToAdd.length;
+  incomesPending.forEach((income) => {
+    rowsToAdd.push(['', income.label, income.amount, '']);
+  });
   offlineToAdd.forEach((amount) => {
     rowsToAdd.push(['', layout.offlineLabel, amount, '']);
   });
@@ -553,8 +677,8 @@ async function writeDailyLedger(entry) {
   expensesPending.forEach((expense) => {
     rowsToAdd.push(['', expense.label, '', expense.amount]);
   });
-  expenseAmountsToAdd.forEach((amount) => {
-    rowsToAdd.push(['', layout.pengeluaranLabel, '', amount]);
+  expenseAmountsToAdd.forEach((item) => {
+    rowsToAdd.push(['', item.label, '', item.amount]);
   });
 
   if (rowsToAdd.length) {
@@ -579,6 +703,14 @@ async function writeDailyLedger(entry) {
       summary.shopeeRow = startRow;
     }
 
+    incomesPending.forEach((income, index) => {
+      summary.incomes.push({
+        ...income,
+        row: startRow + incomeStartIndex + index,
+        action: 'added',
+      });
+    });
+
     expensesPending.forEach((expense, index) => {
       summary.expenses.push({
         ...expense,
@@ -594,12 +726,16 @@ async function writeDailyLedger(entry) {
   summary.expenseAmountsAdded = expenseAmountsToAdd;
   summary.rowsAdded = rowsToAdd.length;
   summary.total =
-    (writeShopee ? shopeeAmount : 0) + offlineToAdd.reduce((sum, amount) => sum + amount, 0);
+    (writeShopee ? shopeeAmount : 0) +
+    offlineToAdd.reduce((sum, amount) => sum + amount, 0) +
+    summary.incomes
+      .filter((income) => income.action !== 'unchanged')
+      .reduce((sum, income) => sum + income.amount, 0);
   summary.expenseTotal =
     summary.expenses
       .filter((expense) => expense.action !== 'unchanged')
       .reduce((sum, expense) => sum + expense.amount, 0) +
-    expenseAmountsToAdd.reduce((sum, amount) => sum + amount, 0);
+    expenseAmountsToAdd.reduce((sum, item) => sum + item.amount, 0);
 
   return summary;
 }
@@ -613,6 +749,7 @@ module.exports = {
   parseAmount,
   pickMonthlyTab,
   serialToYmd,
+  diffLabeledExpenses,
   writeDailyLedger,
   ymdToSerial,
   ymdToSheetDate,

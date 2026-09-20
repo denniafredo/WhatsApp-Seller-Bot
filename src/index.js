@@ -17,6 +17,7 @@ const { handleOngkirCommand } = require('./ongkir/ongkirHandler');
 const { handleKeuanganCommand } = require('./keuangan/keuanganHandler');
 const { createBilasClient } = require('./kilo/bilasClient');
 const { config: recapSummaryConfig, sendRecapSummary } = require('./shared/recapSummary');
+const { watchBotMessages } = require('./shared/botOutput');
 
 const sessionName = process.env.WPP_SESSION || 'business-bot';
 const businessPhoneNumber = process.env.BUSINESS_PHONE || '';
@@ -61,6 +62,11 @@ wppconnect
   });
 
 function start(client) {
+  // Dipasang paling awal: setiap pesan yang dikirim bot dicatat idnya, supaya
+  // parser keuangan bisa membedakan balasan bot dari catatan yang diketik
+  // orang lewat akun bot (keduanya sampai sebagai fromMe).
+  watchBotMessages(client);
+
   const botStartedAtMs = Date.now();
   let loggedInWhatsAppIds;
   const groupMessageBuffers = new Map();

@@ -136,7 +136,27 @@ const selectors = {
   pinMarker: /\bpin\b|masukkan pin|kode pin|6 digit/i,
   pinRejected: /pin (yang anda masukkan )?(salah|tidak (valid|benar))|incorrect pin|wrong pin/i,
   confirmButtonText: /^(konfirmasi|lanjut|lanjutkan|kirim|submit|confirm|ya|tarik dana)$/i,
-  successMarker: /berhasil|sukses|success|permintaan penarikan (anda )?(telah )?(di)?terima/i,
+  // Tombol di kaki halaman Tarik Dana. TIDAK BOLEH ikut mencocokkan "tarik
+  // dana": teks itu juga dipakai breadcrumb ("Beranda > Saldo Penjual > Tarik
+  // Dana") dan judul halaman, yang posisinya jauh lebih atas di DOM - klik akan
+  // mendarat di sana dan Konfirmasi tidak pernah tertekan, sementara alurnya
+  // tetap berjalan seolah-olah sudah.
+  withdrawConfirmText: /^konfirmasi$/i,
+  // Tombol kirim di dalam popup PIN (kalau popupnya tidak mengirim sendiri
+  // begitu digit keenam masuk).
+  pinSubmitText: /^(konfirmasi|ok|oke|selesai|submit|confirm|lanjut|lanjutkan)$/i,
+  // Sukses harus berupa KALIMAT, bukan kata "sukses" lepas. Halaman Tarik Dana
+  // sudah memuat catatan kaki "Diterapkan ke penarikan dana yang sukses"
+  // SEBELUM apa pun ditekan; /sukses/ polos membuat bot melapor berhasil,
+  // mencatat state harian, dan menolak percobaan berikutnya - padahal tidak ada
+  // dana yang ditarik sama sekali.
+  //
+  // Halaman sukses yang sebenarnya berbunyi: "Pengajuan penarikan dana dibuat -
+  // Kamu akan menerima dana secara real-time." Tidak ada kata "berhasil" atau
+  // "sukses" sama sekali di sana, jadi kalimat itu harus disebut apa adanya;
+  // kalau tidak, penarikan yang sudah jadi tetap dianggap belum terkonfirmasi.
+  successMarker:
+    /pengajuan penarikan( dana)?( anda)? (telah )?(dibuat|diajukan|berhasil|diterima)|menerima dana secara real-?time|penarikan( dana)?( anda)? (telah |sedang )?(berhasil|sukses|diterima|diproses)|berhasil ditarik|permintaan penarikan (anda )?(telah )?(di)?terima|withdrawal (request )?(was )?(created|successful|submitted|received)/i,
   // Login Shopee sering pindah ke verifikasi OTP; ini harus dikenali supaya bot
   // berhenti dengan pesan jelas, bukan menunggu sampai timeout.
   otpMarker:
@@ -306,6 +326,167 @@ function clickByText(page, pattern, scopeAttribute) {
     pattern.flags.replace('g', ''),
     scopeAttribute || null
   );
+}
+
+// Selektor popup/modal Shopee. Kelasnya berganti-ganti antar halaman Seller
+// Centre, jadi dikumpulkan longgar lalu disaring oleh ukuran dan posisi.
+const DIALOG_SELECTOR =
+  '[role="dialog"], [role="alertdialog"], .shopee-modal, .shopee-popup, .eds-modal, ' +
+  '[class*="modal"], [class*="Modal"], [class*="dialog"], [class*="Dialog"], ' +
+  '[class*="popup"], [class*="Popup"]';
+
+// clickByText memilih kandidat PERTAMA dalam urutan DOM. Itu cukup untuk tombol
+// login, tapi berbahaya di jalur uang: di halaman Tarik Dana ada breadcrumb dan
+// judul yang teksnya sama persis dengan tombol, dan keduanya berada lebih atas
+// di DOM. Klik untuk menyelesaikan penarikan karena itu dibuat lebih ketat:
+//   - hanya elemen yang memang bisa diklik (button / role=button / a / elemen
+//     ber-cursor pointer) yang jadi kandidat,
+//   - bisa dibatasi ke dalam popup yang sedang terbuka (lihat insideDialog),
+//   - kalau lowest=true, yang dipilih adalah kandidat PALING BAWAH di halaman,
+//     yaitu tombol di kaki form - bukan teks navigasi di kepala halaman,
+//   - kliknya klik mouse sungguhan di titik tengah elemen, karena tombol Shopee
+//     dirender React dan sebagian handler-nya menunggu mousedown/mouseup,
+//   - yang benar-benar diklik dikembalikan supaya bisa dibaca di log.
+async function clickButtonByText(page, pattern, options = {}) {
+  // locateOnly = cari tombolnya dan laporkan teksnya, TAPI jangan diklik.
+  // Dipakai mode uji supaya selektor bisa diverifikasi tanpa memindahkan uang.
+  const { insideDialog = false, lowest = false, locateOnly = false } = options;
+
+  const target = await withPageRetry(() =>
+    page.evaluate(
+      (source, flags, opts, dialogSelector) => {
+        const isVisible = (element) => {
+          const style = getComputedStyle(element);
+          if (style.visibility === 'hidden' || style.display === 'none') {
+            return false;
+          }
+          const box = element.getBoundingClientRect();
+          return box.width >= 8 && box.height >= 8;
+        };
+
+        let root = document;
+
+        if (opts.insideDialog) {
+          const dialogs = [...document.querySelectorAll(dialogSelector)].filter((element) => {
+            if (!isVisible(element)) {
+              return false;
+            }
+            const box = element.getBoundingClientRect();
+            return box.width >= 200 && box.height >= 120;
+          });
+          // Popup terakhir yang dirender adalah yang paling atas di layar.
+          root = dialogs[dialogs.length - 1];
+          if (!root) {
+            return null;
+          }
+        }
+
+        const expression = new RegExp(source, flags);
+        const clickable = [...root.querySelectorAll('*')].filter((element) => {
+          const text = (element.innerText || '').trim().replace(/\s+/g, ' ');
+          if (!text || text.length > 24 || !expression.test(text)) {
+            return false;
+          }
+          if (element.disabled || element.getAttribute('aria-disabled') === 'true') {
+            return false;
+          }
+          // Teks tombol Shopee ada di dalam <span>; yang disabled adalah
+          // <button> induknya. Tanpa cek ini, tombol Konfirmasi di popup PIN
+          // "terklik" saat masih mati - dan tidak ada yang terjadi.
+          const owner = element.closest('button');
+          if (owner && (owner.disabled || owner.getAttribute('aria-disabled') === 'true')) {
+            return false;
+          }
+          if (!isVisible(element)) {
+            return false;
+          }
+          const tag = element.tagName.toLowerCase();
+          if (tag === 'button' || tag === 'a' || element.getAttribute('role') === 'button') {
+            return true;
+          }
+          // Breadcrumb dan judul halaman tidak ber-cursor pointer; tombol Shopee
+          // yang dibuat dari <div> hampir selalu punya.
+          return getComputedStyle(element).cursor === 'pointer';
+        });
+
+        if (!clickable.length) {
+          return null;
+        }
+
+        const innermost = clickable.filter(
+          (element) => !clickable.some((other) => other !== element && element.contains(other))
+        );
+        const candidates = innermost.length ? innermost : clickable;
+
+        const chosen = opts.lowest
+          ? candidates.reduce((best, element) =>
+              element.getBoundingClientRect().top > best.getBoundingClientRect().top ? element : best
+            )
+          : candidates[0];
+
+        chosen.scrollIntoView({ block: 'center', inline: 'center' });
+
+        const box = chosen.getBoundingClientRect();
+        const x = box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        const text = (chosen.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+
+        // Kalau ada banner/overlay yang menutupi titik tengahnya, klik mouse
+        // akan mendarat di overlay itu. Dalam kasus itu elemennya diklik
+        // langsung - kurang realistis, tapi jauh lebih baik daripada menekan
+        // iklan yang kebetulan lewat.
+        const onTop = document.elementFromPoint(x, y);
+        const reachable = onTop && (chosen === onTop || chosen.contains(onTop) || onTop.contains(chosen));
+
+        if (!reachable) {
+          if (!opts.locateOnly) {
+            chosen.click();
+          }
+          return { text, clicked: true, candidates: candidates.length };
+        }
+
+        return { text, x, y, clicked: false, candidates: candidates.length };
+      },
+      pattern.source,
+      pattern.flags.replace('g', ''),
+      { insideDialog, lowest, locateOnly },
+      DIALOG_SELECTOR
+    )
+  ).catch(() => null);
+
+  if (!target) {
+    return null;
+  }
+
+  if (!target.clicked && !locateOnly) {
+    await page.mouse.click(target.x, target.y).catch(() => {});
+  }
+
+  return target.text;
+}
+
+// Daftar tombol yang terlihat di halaman - dipakai saat sesuatu tidak ketemu,
+// supaya pesan gagalnya menyebut apa yang sebenarnya ada di layar.
+function listVisibleButtons(page, limit = 15) {
+  return page
+    .evaluate((max) => {
+      const seen = new Set();
+      const out = [];
+      for (const element of document.querySelectorAll('button, a, [role="button"]')) {
+        const text = (element.innerText || '').trim().replace(/\s+/g, ' ');
+        const box = element.getBoundingClientRect();
+        if (!text || text.length > 40 || box.width < 8 || box.height < 8 || seen.has(text)) {
+          continue;
+        }
+        seen.add(text);
+        out.push(text);
+        if (out.length >= max) {
+          break;
+        }
+      }
+      return out;
+    }, limit)
+    .catch(() => []);
 }
 
 // "Rp1.234.567" -> 1234567. Hanya titik yang dipakai sebagai pemisah ribuan;
@@ -857,17 +1038,70 @@ async function readBalance(page) {
 // Tanpa PIN, penarikan berhenti di popup dan dilaporkan apa adanya.
 
 // Baca nominal di kolom "Jumlah Penarikan Dana".
+//
+// Tidak boleh sekadar "input pertama yang isinya angka": radio tujuan penarikan
+// juga <input> dan value-nya angka ("1"), dan letaknya lebih dulu di DOM -
+// hasilnya nominal terbaca Rp1 dan penarikan dibatalkan pengaman nominal.
+// Karena itu kolomnya dicari lewat labelnya dulu, dan hanya input yang benar-
+// benar bisa diketik yang dihitung.
 function readWithdrawAmountField(page) {
   return page
     .evaluate(() => {
-      const inputs = [...document.querySelectorAll('input')];
-      for (const input of inputs) {
-        const digits = String(input.value || '').replace(/[^\d]/g, '');
-        if (digits) {
-          return digits;
+      const skipTypes = ['radio', 'checkbox', 'hidden', 'submit', 'button', 'file'];
+
+      const typable = (element) => {
+        if (skipTypes.includes(String(element.type || '').toLowerCase())) {
+          return false;
+        }
+        const style = getComputedStyle(element);
+        const box = element.getBoundingClientRect();
+        return (
+          style.visibility !== 'hidden' &&
+          style.display !== 'none' &&
+          box.width >= 20 &&
+          box.height >= 8
+        );
+      };
+
+      const digitsOf = (element) => String(element.value || '').replace(/[^\d]/g, '');
+
+      // 1. Lewat label "Jumlah Penarikan Dana": naik dari labelnya sampai
+      //    ketemu pembungkus yang memuat kolom isiannya.
+      const labels = [...document.querySelectorAll('*')].filter((element) => {
+        const text = (element.innerText || '').trim();
+        return (
+          text.length > 0 &&
+          text.length < 60 &&
+          /jumlah penarikan dana|withdrawal amount/i.test(text)
+        );
+      });
+
+      const label = labels[labels.length - 1];
+
+      if (label) {
+        let scope = label.parentElement;
+        let hops = 0;
+        while (scope && hops < 6) {
+          const field = [...scope.querySelectorAll('input')].find(
+            (element) => typable(element) && digitsOf(element)
+          );
+          if (field) {
+            return digitsOf(field);
+          }
+          scope = scope.parentElement;
+          hops += 1;
         }
       }
-      return '';
+
+      // 2. Cadangan: dari semua kolom yang bisa diketik, ambil yang angkanya
+      //    paling panjang - nominal penarikan selalu jauh lebih panjang dari
+      //    angka nyasar seperti "1".
+      const candidates = [...document.querySelectorAll('input')]
+        .filter((element) => typable(element) && digitsOf(element))
+        .map((element) => digitsOf(element))
+        .sort((a, b) => b.length - a.length);
+
+      return candidates[0] || '';
     })
     .catch(() => '');
 }
@@ -897,29 +1131,269 @@ function readSelectedDestination(page) {
     .catch(() => '');
 }
 
-// Isi PIN. Shopee bisa memakai satu kolom atau enam kotak terpisah, jadi
-// keduanya ditangani: kalau kotaknya banyak, digitnya disebar satu-satu.
-async function fillWithdrawPin(page, pin) {
-  const boxes = await page.$$('input[type="password"], input[type="tel"], input[inputmode="numeric"]');
+// Cari kotak PIN. Dua hal yang bikin ini tidak sesederhana page.$$():
+//   1. Popup PIN Shopee kadang dirender di dalam iframe, jadi semua frame
+//      diperiksa, bukan cuma dokumen utama.
+//   2. Bentuknya bisa satu kolom, bisa enam kotak terpisah, dan sebagian
+//      widget menaruh satu input transparan di belakang enam kotak hias.
+// Input yang readonly/disabled diabaikan supaya yang terisi bukan kotak hias.
+async function findPinInputs(page) {
+  const loose = [];
 
-  if (!boxes.length) {
-    return false;
+  for (const frame of page.frames()) {
+    let inputs = [];
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      inputs = await frame.$$('input');
+    } catch (error) {
+      continue;
+    }
+
+    const inDialog = [];
+
+    for (const input of inputs) {
+      // eslint-disable-next-line no-await-in-loop
+      const info = await input
+        .evaluate((element, dialogSelector) => {
+          const style = getComputedStyle(element);
+          const box = element.getBoundingClientRect();
+          return {
+            type: String(element.type || '').toLowerCase(),
+            maxLength: element.maxLength,
+            inputMode: element.getAttribute('inputmode') || '',
+            valueLength: String(element.value || '').length,
+            blocked: Boolean(element.readOnly || element.disabled),
+            inDialog: Boolean(element.closest(dialogSelector)),
+            visible:
+              style.visibility !== 'hidden' &&
+              style.display !== 'none' &&
+              box.width >= 4 &&
+              box.height >= 4,
+          };
+        }, DIALOG_SELECTOR)
+        .catch(() => null);
+
+      if (!info || info.blocked || !info.visible) {
+        continue;
+      }
+
+      // Kotak PIN selalu kosong saat popupnya baru terbuka. Syarat ini yang
+      // menjaga kolom "Jumlah Penarikan Dana" - yang sudah terisi nominal dan
+      // bisa saja ber-inputmode numeric - tidak ikut dianggap kotak PIN dan
+      // ditimpa PIN.
+      if (info.valueLength > 0) {
+        continue;
+      }
+
+      // Bentuk khas kotak PIN: input password, atau kotak satuan dengan
+      // maxlength kecil. Ini yang boleh dipakai walau di luar popup.
+      const looksLikePin =
+        info.type === 'password' || (info.maxLength > 0 && info.maxLength <= 8);
+
+      // Di dalam popup, kolom angka biasa pun aman dianggap kolom PIN - popup
+      // yang muncul setelah Konfirmasi memang hanya meminta PIN.
+      const numericInDialog =
+        info.inDialog && (info.type === 'tel' || /numeric|decimal/.test(info.inputMode));
+
+      if (info.inDialog && (looksLikePin || numericInDialog)) {
+        inDialog.push(input);
+      } else if (looksLikePin) {
+        loose.push({ frame, input });
+      }
+    }
+
+    if (inDialog.length) {
+      return { frame, boxes: inDialog };
+    }
   }
+
+  // Tidak ada popup yang terdeteksi (kelas modalnya bisa berganti), tapi ada
+  // input berbentuk kotak PIN di halaman. Dipakai sebagai cadangan.
+  if (loose.length) {
+    return { frame: loose[0].frame, boxes: loose.map((item) => item.input) };
+  }
+
+  return null;
+}
+
+// Potret isi popup PIN: dipakai mode uji untuk melihat bentuk aslinya tanpa
+// mengetik apa pun. Enam kotak PIN di Seller Centre belum tentu enam <input>.
+async function dumpPinDialog(page) {
+  const frames = [];
+
+  for (const frame of page.frames()) {
+    // eslint-disable-next-line no-await-in-loop
+    const info = await frame
+      .evaluate((dialogSelector) => {
+        const describe = (element) => {
+          const box = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return {
+            tag: element.tagName.toLowerCase(),
+            type: element.getAttribute('type') || '',
+            maxLength: element.maxLength,
+            inputMode: element.getAttribute('inputmode') || '',
+            className: String(element.className || '').slice(0, 80),
+            valueLength: String(element.value || '').length,
+            readOnly: Boolean(element.readOnly),
+            disabled: Boolean(element.disabled),
+            opacity: style.opacity,
+            rect: [Math.round(box.left), Math.round(box.top), Math.round(box.width), Math.round(box.height)],
+          };
+        };
+
+        const dialogs = [...document.querySelectorAll(dialogSelector)].filter((element) => {
+          const box = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return (
+            style.visibility !== 'hidden' &&
+            style.display !== 'none' &&
+            box.width >= 200 &&
+            box.height >= 120
+          );
+        });
+
+        const dialog = dialogs[dialogs.length - 1];
+        const allInputs = [...document.querySelectorAll('input')].map(describe);
+
+        // Widget passcode Shopee: satu <input> transparan di dalam <label>,
+        // ditemani kotak-kotak hias. Status "sudah terisi" hanya terlihat dari
+        // kotak-kotak itu, bukan dari input.value - jadi ikut dipotret.
+        const passcode = dialog
+          ? dialog.querySelector('label.shopee-passcode, [class*="passcode"]')
+          : null;
+
+        return {
+          url: location.href,
+          passcodeHtml: passcode ? passcode.outerHTML.slice(0, 3000) : '',
+          passcodeInputValue: passcode
+            ? String((passcode.querySelector('input') || {}).value || '')
+            : '',
+          dialogFound: Boolean(dialog),
+          dialogText: dialog ? (dialog.innerText || '').replace(/\s+/g, ' ').slice(0, 200) : '',
+          dialogHtml: dialog ? dialog.outerHTML.slice(0, 6000) : '',
+          dialogInputs: dialog ? [...dialog.querySelectorAll('input')].map(describe) : [],
+          allInputs,
+        };
+      }, DIALOG_SELECTOR)
+      .catch(() => null);
+
+    if (info && (info.dialogFound || info.allInputs.length)) {
+      frames.push(info);
+    }
+  }
+
+  return frames;
+}
+
+// Berapa digit PIN yang benar-benar masuk.
+//
+// TIDAK BOLEH dibaca dari input.value. Widget passcode Seller Centre adalah
+// satu <input> transparan di dalam <label class="shopee-passcode"> plus enam
+// <div class="block"> hiasan; komponen Vue-nya menyimpan digitnya sendiri dan
+// SELALU mengosongkan input.value. Membaca value membuat PIN yang sudah terisi
+// penuh terbaca 0/6 dan penarikan dibatalkan sia-sia.
+//
+// Yang dihitung karena itu kotak hias yang sudah bertitik: kotak terisi memuat
+// <div class="passcode">, kotak kosong memuat <div class="">. input.value cuma
+// dipakai sebagai cadangan kalau widget-nya suatu saat berganti bentuk.
+async function countFilledPinDigits(frame, boxes) {
+  const fromWidget = await frame
+    .evaluate(() => {
+      const widget =
+        document.querySelector('label.shopee-passcode') ||
+        document.querySelector('label[class*="passcode"]') ||
+        document.querySelector('form[class*="passcode"]');
+
+      if (!widget) {
+        return -1;
+      }
+
+      const blocks = [...widget.querySelectorAll('.block, [class*="block"]')];
+
+      if (!blocks.length) {
+        return -1;
+      }
+
+      return blocks.filter((block) =>
+        block.querySelector('[class*="passcode"], [class*="dot"], [class*="filled"]')
+      ).length;
+    })
+    .catch(() => -1);
+
+  if (fromWidget >= 0) {
+    return fromWidget;
+  }
+
+  const lengths = await Promise.all(
+    boxes.map((box) => box.evaluate((element) => String(element.value || '').length).catch(() => 0))
+  );
+
+  return lengths.reduce((total, length) => total + length, 0);
+}
+
+// Kosongkan isian PIN sebelum mengetik ulang, supaya percobaan kedua tidak
+// menempel di belakang digit yang sudah terlanjur masuk.
+async function clearPinField(page, frame, boxes, length) {
+  await boxes[0].click().catch(() => {});
+
+  for (let index = 0; index < length + 2; index += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await page.keyboard.press('Backspace').catch(() => {});
+  }
+
+  await sleep(300);
+  return countFilledPinDigits(frame, boxes);
+}
+
+// Isi PIN, lalu pastikan benar-benar masuk. Dua bentuk yang ditangani: enam
+// kotak <input> terpisah, dan satu kolom (termasuk widget passcode Vue di atas).
+async function fillWithdrawPin(page, pin) {
+  const found = await findPinInputs(page);
+
+  if (!found) {
+    return { filled: false, digits: 0, boxes: 0 };
+  }
+
+  const { frame, boxes } = found;
 
   if (boxes.length >= pin.length) {
     for (let index = 0; index < pin.length; index += 1) {
       // eslint-disable-next-line no-await-in-loop
-      await boxes[index].type(pin[index], { delay: 60 });
+      await boxes[index].click().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await boxes[index].type(pin[index], { delay: 80 }).catch(() => {});
     }
-    return true;
+  } else {
+    // .type() memfokuskan elemennya sendiri - penting di sini, karena input-nya
+    // transparan dan tertutup kotak hias sehingga klik biasa bisa tidak mendarat.
+    await boxes[0].click().catch(() => {});
+    await boxes[0].type(pin, { delay: 120 }).catch(() => {});
   }
 
-  await boxes[0].click({ clickCount: 3 }).catch(() => {});
-  await boxes[0].type(pin, { delay: 60 });
-  return true;
+  await sleep(600);
+  let digits = await countFilledPinDigits(frame, boxes);
+
+  if (digits !== pin.length) {
+    // Percobaan kedua: kosongkan dulu, lalu ketik lewat keyboard pada elemen
+    // yang sedang fokus - beberapa widget memindahkan fokusnya sendiri.
+    await clearPinField(page, frame, boxes, pin.length);
+    await page.keyboard.type(pin, { delay: 150 }).catch(() => {});
+    await sleep(600);
+    digits = await countFilledPinDigits(frame, boxes);
+  }
+
+  return { filled: digits >= pin.length, digits, boxes: boxes.length };
 }
 
-async function performWithdraw(page, onProgress, expectedAmount) {
+async function performWithdraw(page, onProgress, expectedAmount, options = {}) {
+  // stopBeforeConfirm: jalankan seluruh pemeriksaan sampai TEPAT sebelum tombol
+  // Konfirmasi ditekan, lalu berhenti. Ini yang membuat perbaikan selektor bisa
+  // diuji di halaman asli tanpa ada uang yang berpindah.
+  const stopBeforeConfirm = Boolean(options.stopBeforeConfirm);
+  // pinDomOnly: tekan Konfirmasi supaya popup PIN terbuka, potret isinya, lalu
+  // berhenti TANPA mengetik PIN. Tanpa PIN yang sah tidak ada dana yang pindah.
+  const pinDomOnly = Boolean(options.pinDomOnly);
   await onProgress('Menekan Tarik Dana...');
 
   if (!(await clickByText(page, selectors.withdrawButtonText))) {
@@ -993,29 +1467,121 @@ async function performWithdraw(page, onProgress, expectedAmount) {
     );
   }
 
+  if (stopBeforeConfirm) {
+    const confirmLabel = await clickButtonByText(page, selectors.withdrawConfirmText, {
+      lowest: true,
+      locateOnly: true,
+    });
+
+    if (!confirmLabel) {
+      const buttons = await listVisibleButtons(page);
+      throw new ShopeeWithdrawError(
+        'WITHDRAW_CONFIRM_MISSING',
+        'Tombol "Konfirmasi" tidak ditemukan di halaman Tarik Dana. ' +
+          `Tombol yang terlihat: ${buttons.join(' | ') || '(tidak ada)'}`
+      );
+    }
+
+    return { amount: fieldAmount, destination, confirmLabel, stoppedBeforeConfirm: true };
+  }
+
+  // Teks halaman SEBELUM Konfirmasi ditekan. Dipakai dua kali di bawah: untuk
+  // memastikan klik Konfirmasi benar-benar mengubah sesuatu, dan supaya kalimat
+  // sukses yang sudah ada sejak awal tidak dihitung sebagai bukti berhasil.
+  const textBeforeConfirm = await readPageText(page).catch(() => '');
+  const successBeforeConfirm = selectors.successMarker.test(textBeforeConfirm);
+
   await onProgress(`Mengonfirmasi penarikan ${formatRupiah(fieldAmount)} ke ${destination.slice(0, 40)}...`);
 
-  if (!(await clickByText(page, selectors.confirmButtonText))) {
+  // Pakai withdrawConfirmText, BUKAN confirmButtonText: yang terakhir juga
+  // cocok dengan "Tarik Dana" di breadcrumb dan judul halaman ini. lowest=true
+  // memilih kandidat paling bawah, yaitu tombol di kaki form.
+  const confirmClicked = await clickButtonByText(page, selectors.withdrawConfirmText, {
+    lowest: true,
+  });
+
+  if (!confirmClicked) {
+    const buttons = await listVisibleButtons(page);
     throw new ShopeeWithdrawError(
       'WITHDRAW_CONFIRM_MISSING',
-      'Tombol "Konfirmasi" tidak ditemukan di halaman Tarik Dana.'
+      'Tombol "Konfirmasi" tidak ditemukan di halaman Tarik Dana. ' +
+        `Tombol yang terlihat: ${buttons.join(' | ') || '(tidak ada)'}`
     );
   }
 
+  await onProgress(`Tombol "${confirmClicked}" ditekan, menunggu popup PIN...`);
+
   // --- PIN 6 digit ---
-  await onProgress('Memasukkan PIN penarikan...');
+  // Popupnya muncul beberapa saat setelah Konfirmasi. Yang ditunggu adalah
+  // kolom PIN-nya, bukan sekadar kata "PIN" di teks halaman: teks bisa muncul
+  // dari elemen lain, sementara kolom input adalah bukti popupnya benar-benar
+  // terbuka dan siap diisi.
+  const pinDeadlineMs = Date.now() + 30000;
+  let pinInputs = null;
+  let sawPinText = false;
+  let sawSuccess = false;
 
-  const pinAppeared = await page
-    .waitForFunction(
-      (marker) =>
-        new RegExp(marker, 'i').test((document.body?.innerText || '').replace(/\s+/g, ' ')),
-      { timeout: 20000 },
-      selectors.pinMarker.source
-    )
-    .then(() => true)
-    .catch(() => false);
+  while (Date.now() < pinDeadlineMs) {
+    // eslint-disable-next-line no-await-in-loop
+    pinInputs = await findPinInputs(page);
+    if (pinInputs) {
+      break;
+    }
 
-  if (pinAppeared || !config.withdrawPin) {
+    // eslint-disable-next-line no-await-in-loop
+    const text = await readPageText(page).catch(() => '');
+    sawPinText = sawPinText || selectors.pinMarker.test(text);
+
+    // Sebagian akun tidak diminta PIN sama sekali dan langsung sukses.
+    if (!successBeforeConfirm && selectors.successMarker.test(text)) {
+      sawSuccess = true;
+      break;
+    }
+
+    if (selectors.otpMarker.test(text)) {
+      throw new ShopeeWithdrawError(
+        'WITHDRAW_OTP_REQUIRED',
+        'Shopee minta OTP untuk penarikan ini dan bot tidak bisa membacanya. ' +
+          'Penarikan BELUM selesai - teruskan manual di Seller Centre.'
+      );
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(1000);
+  }
+
+  if (pinDomOnly) {
+    // Uji ketik: maksimal 2 digit, dipaksa di sini. Popup PIN baru mengirim
+    // sendiri di digit keenam, jadi 2 digit tidak akan pernah menyelesaikan
+    // penarikan - ini yang membuat potret "kotak terisi" aman diambil.
+    const probeDigits = String(options.pinProbeDigits || '').replace(/[^\d]/g, '').slice(0, 2);
+    let countedDigits = -1;
+
+    if (probeDigits) {
+      const found = await findPinInputs(page);
+      if (found) {
+        await found.boxes[0].click().catch(() => {});
+        await found.boxes[0].type(probeDigits, { delay: 120 }).catch(() => {});
+        await sleep(600);
+        // Ini yang sebenarnya diuji: apakah pembacaan "berapa digit yang masuk"
+        // cocok dengan yang diketik. Kalau angkanya meleset, pengisian PIN
+        // sungguhan akan dibatalkan sia-sia seperti sebelumnya.
+        countedDigits = await countFilledPinDigits(found.frame, found.boxes);
+      }
+    }
+
+    return {
+      probeDigits,
+      countedDigits,
+      amount: fieldAmount,
+      destination,
+      pinDialog: await dumpPinDialog(page),
+      pinInputsFound: pinInputs ? pinInputs.boxes.length : 0,
+      stoppedAtPinDialog: true,
+    };
+  }
+
+  if (pinInputs) {
     if (!config.withdrawPin) {
       throw new ShopeeWithdrawError(
         'WITHDRAW_PIN_REQUIRED',
@@ -1032,18 +1598,50 @@ async function performWithdraw(page, onProgress, expectedAmount) {
       );
     }
 
-    if (!(await fillWithdrawPin(page, config.withdrawPin))) {
+    await onProgress('Popup PIN terbuka, memasukkan PIN penarikan...');
+
+    const pinResult = await fillWithdrawPin(page, config.withdrawPin);
+
+    if (!pinResult.filled) {
+      // Berhenti di sini, jangan menekan kirim dengan PIN separuh: percobaan
+      // yang ditolak menghabiskan jatah percobaan PIN di akun Shopee.
       throw new ShopeeWithdrawError(
-        'WITHDRAW_PIN_MISSING',
-        'Popup PIN muncul tapi kolom PIN-nya tidak ditemukan. Penarikan BELUM selesai - ' +
-          'selesaikan manual di Seller Centre.'
+        'WITHDRAW_PIN_NOT_FILLED',
+        `PIN tidak berhasil terisi penuh (${pinResult.digits}/${config.withdrawPin.length} digit ` +
+          `pada ${pinResult.boxes} kolom). Penarikan BELUM selesai - selesaikan manual di Seller Centre.`
       );
     }
 
-    // Sebagian popup PIN mengirim sendiri begitu digit terakhir masuk; kalau
-    // tidak, tombol konfirmasinya ditekan.
-    await sleep(1200);
-    await clickByText(page, selectors.confirmButtonText);
+    // Kebanyakan popup PIN Shopee mengirim sendiri begitu digit keenam masuk.
+    // Kalau setelah jeda popupnya masih terbuka, tombol kirim DI DALAM popup
+    // yang ditekan - bukan tombol mana pun di halaman di belakangnya.
+    await sleep(1500);
+
+    if (await findPinInputs(page)) {
+      await clickButtonByText(page, selectors.pinSubmitText, { insideDialog: true });
+    }
+  } else if (sawPinText) {
+    throw new ShopeeWithdrawError(
+      'WITHDRAW_PIN_MISSING',
+      'Popup PIN muncul tapi kolom PIN-nya tidak ditemukan. Penarikan BELUM selesai - ' +
+        'selesaikan manual di Seller Centre.'
+    );
+  } else if (!sawSuccess) {
+    // Tidak ada popup PIN, tidak ada pesan sukses, dan halamannya sama persis
+    // seperti sebelum tombol ditekan: kliknya tidak mengenai apa pun. Berhenti
+    // sekarang dengan daftar tombol yang terlihat, jangan menunggu dua menit
+    // untuk konfirmasi yang tidak akan datang.
+    const textAfterConfirm = await readPageText(page).catch(() => '');
+
+    if (textAfterConfirm && textAfterConfirm === textBeforeConfirm) {
+      const buttons = await listVisibleButtons(page);
+      throw new ShopeeWithdrawError(
+        'WITHDRAW_CONFIRM_NO_EFFECT',
+        `Tombol "${confirmClicked}" ditekan tapi halaman tidak berubah sama sekali - popup PIN ` +
+          'tidak muncul. Tidak ada dana yang ditarik. ' +
+          `Tombol yang terlihat: ${buttons.join(' | ') || '(tidak ada)'}`
+      );
+    }
   }
 
   await onProgress('Menunggu konfirmasi Shopee...');
@@ -1053,7 +1651,9 @@ async function performWithdraw(page, onProgress, expectedAmount) {
     // eslint-disable-next-line no-await-in-loop
     const text = await readPageText(page).catch(() => '');
 
-    if (selectors.successMarker.test(text)) {
+    // successBeforeConfirm menjaga dari positif palsu: halaman Tarik Dana sudah
+    // memuat catatan kaki "Diterapkan ke penarikan dana yang sukses" sejak awal.
+    if (!successBeforeConfirm && selectors.successMarker.test(text)) {
       return { successText: text.slice(0, 400), amount: fieldAmount, destination };
     }
 
@@ -1151,6 +1751,43 @@ async function withdrawShopeeBalance(options = {}) {
 
       if (dryRun) {
         console.log(`[dry-run] Saldo Shopee dapat ditarik: ${formatRupiah(balance.amount)}`);
+
+        // Mode potret PIN: sampai popup PIN terbuka, lalu berhenti tanpa mengetik.
+        if (options.probePin && balance.amount > 0) {
+          const probe = await performWithdraw(page, onProgress, balance.amount, {
+            pinDomOnly: true,
+            pinProbeDigits: options.pinProbeDigits,
+          });
+
+          return {
+            ...balance,
+            status: 'probe-pin',
+            alreadyDone: false,
+            destination: probe.destination,
+            pinDialog: probe.pinDialog,
+            pinInputsFound: probe.pinInputsFound,
+            probeDigits: probe.probeDigits,
+            countedDigits: probe.countedDigits,
+          };
+        }
+
+        // Mode uji: buka halaman Tarik Dana dan periksa tujuan, nominal, serta
+        // tombol Konfirmasi - lalu berhenti sebelum tombolnya ditekan.
+        if (options.probe && balance.amount > 0) {
+          const probe = await performWithdraw(page, onProgress, balance.amount, {
+            stopBeforeConfirm: true,
+          });
+
+          return {
+            ...balance,
+            status: 'probe',
+            alreadyDone: false,
+            destination: probe.destination,
+            confirmLabel: probe.confirmLabel,
+            formAmount: probe.amount,
+          };
+        }
+
         return { ...balance, status: 'dry-run', alreadyDone: false };
       }
 
@@ -1207,6 +1844,10 @@ async function withdrawShopeeBalance(options = {}) {
 
 module.exports = {
   PROFILE_DIR,
+  clickButtonByText,
+  dumpPinDialog,
+  findPinInputs,
+  listVisibleButtons,
   MANUAL_HINTS,
   detectLoginState,
   gotoStable,
