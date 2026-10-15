@@ -1,42 +1,42 @@
-# Graph Report - whatsapp-bot  (2026-09-20)
+# Graph Report - whatsapp-bot  (2026-10-15)
 
 ## Corpus Check
-- 62 files · ~757,356 words
+- 74 files · ~771,036 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 8 file(s) not represented in the graph (top: .rnnn 4, (none) 3, .example 1)
 
 ## Summary
-- 996 nodes · 1898 edges · 46 communities (45 shown, 1 thin omitted)
-- Extraction: 84% EXTRACTED · 15% INFERRED · 1% AMBIGUOUS · INFERRED: 291 edges (avg confidence: 0.85)
+- 1141 nodes · 2186 edges · 57 communities (56 shown, 1 thin omitted)
+- Extraction: 84% EXTRACTED · 15% INFERRED · 0% AMBIGUOUS · INFERRED: 336 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `56142f15`
+- Built from commit: `ee2c5062`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- Shopee Seller Centre Automation
+- shopeeWithdrawClient.js
 - Ongkir Command and Maps Links
-- Video Noise Reduction Engines
-- Cek Kilo and Bilas API
-- Command Triggers and Mentions
-- Maxim App Driver on Emulator
-- Auto Rekap Orchestration
-- Finance Spreadsheet Ledger
-- Package Manifest and Dependencies
-- Bot Entry Point Wiring
-- AI Expense Note Parsing
+- videoNoiseAbCli.js
+- kiloHandler.js
+- videoNoiseHandler.js
+- mumuClient.js
+- keuanganHandler.js
+- keuanganSheet.js
+- package.json
+- index.js
+- aiPengeluaranParser.js
 - Styrofoam Box Price List
 - Latest Price Lookup and Product Map
 - Colored Tape Box Price List
-- Feature Rationale and Engine Choices
+- kiloTrigger.js
 - Business Day and Rekap Trigger
 - Ice Pack Price List
 - Thermal Bag Price List
-- Google Sheets API Client
+- googleSheets.js
 - PE Foam Price List
-- Shopee Price Sync
+- shopeePriceSync.js
 - Shopee OAuth Token Store
 - Cek Kilo Sheet Writer
 - VoiceCleaner Web Automation
@@ -44,32 +44,43 @@
 - Plastic Pallet Price List
 - Product Name Alias Rules
 - Shopee Price Import
-- Sales Book Photo Reading
+- jualanParser.js
 - Order Recap Message Parser
 - Message Filters and Dispatch
 - Bot Output Detection
 - Ice Gel Price List
 - Styrofoam Cutter Price List
-- Recap Summary Expense Parser
+- pengeluaranParser.js
 - Styrofoam Glue Price List
 - QRIS Payment Asset
-- Shopee Price Mapping CLI
+- shopeePriceMap.js
 - Keyword Reply Matching
-- Offline Deposit Parsing
+- offlineParser.js
 - Welcome Menu Message
-- Recap Image Rendering
-- Payment Reply Flow
+- notaHandler.js
+- squeezeSchedule.js
 - Location Reply Flow
 - Video Job Queue
 - Welcome Trigger Words
+- dashmall.js
+- videoNoiseReduction.js
+- ref_path
+- kiloCompare.js
+- notaParser.js
+- bilasClient.js
+- notaRender.js
+- kiloPhotoReader.js
+- reduceNoise
+- notaBrands.js
+- paymentReplies.js
 
 ## God Nodes (most connected - your core abstractions)
-1. `start()` - 28 edges
+1. `start()` - 31 edges
 2. `Katalog & Daftar Harga Box Sterofoam` - 20 edges
-3. `performWithdraw()` - 17 edges
-4. `writeDailyLedger()` - 16 edges
-5. `withdrawShopeeBalance()` - 15 edges
-6. `normalizeWhatsAppId()` - 15 edges
+3. `writeDailyLedger()` - 18 edges
+4. `normalizeWhatsAppId()` - 18 edges
+5. `performWithdraw()` - 17 edges
+6. `withdrawShopeeBalance()` - 17 edges
 7. `Sterofoam Box Lakban Warna + Aluminium (product line)` - 14 edges
 8. `runKeuanganJob()` - 13 edges
 9. `OngkirError` - 13 edges
@@ -109,51 +120,51 @@
 - **Customer payment request answered with static QRIS card** — assets_qris_payment_reply_flow, assets_qris_image, assets_qris_merchant, assets_qris_scan_pay_instructions [INFERRED 0.85]
 - **Kg-rated box series (5/10/30/35/60 kg) forming the numeric capacity ladder of the catalog** — assets_pl_box_warna_var_box_5_kg, assets_pl_box_warna_var_box_10_kg, assets_pl_box_warna_var_box_30_kg, assets_pl_box_warna_var_box_35_kg, assets_pl_box_warna_var_box_60_kg [INFERRED 0.95]
 
-## Communities (46 total, 1 thin omitted)
+## Communities (57 total, 1 thin omitted)
 
-### Community 0 - "Shopee Seller Centre Automation"
-Cohesion: 0.06
+### Community 0 - "shopeeWithdrawClient.js"
+Cohesion: 0.07
 Nodes (70): Alur Tarik Dana dan PIN 6 digit, npm run cek:menu (pencarian URL halaman saldo), Gerbang kata sandi halaman Saldo Saya, gotoStable (navigasi dicoba ulang), Pencocokan label saldo (baris persis), Login pertama Seller Centre (manual, OTP), Verifikasi identitas Shopee (IVS), collectLinks() (+62 more)
 
 ### Community 1 - "Ongkir Command and Maps Links"
 Cohesion: 0.06
 Nodes (64): { checkOngkir }, { expandLinks }, { formatRupiah }, fs, main(), path, { resolveOrigin, listOrigins }, expandLinks() (+56 more)
 
-### Community 2 - "Video Noise Reduction Engines"
-Cohesion: 0.05
-Nodes (60): ref_fs, ref_path, buildVariants(), { findWindows, measureRms, measureTilt, runFfmpeg }, fs, main(), modelDir, path (+52 more)
+### Community 2 - "videoNoiseAbCli.js"
+Cohesion: 0.16
+Nodes (21): buildVariants(), { findWindows, measureRms, measureTilt, runFfmpeg }, fs, main(), modelDir, path, { probeMedia, reduceNoiseWithDeepFilter }, toFilterModel() (+13 more)
 
-### Community 3 - "Cek Kilo and Bilas API"
-Cohesion: 0.05
-Nodes (58): c_project_whatsapp_bot_src_kilo_kilotrigger_getkilocommand, c_project_whatsapp_bot_src_kilo_kilotrigger_issupportedimage, c_project_whatsapp_bot_src_shared_progressreporter_createprogressreporter, @anthropic-ai/bedrock-sdk, ref_crypto, BilasError, createBilasClient(), ensureSession() (+50 more)
-
-### Community 4 - "Command Triggers and Mentions"
-Cohesion: 0.06
-Nodes (51): ref_os, botIsMentioned(), getKiloCommand(), getMentionedIds(), getQuotedMessageId(), getRawCommandText(), hasMentions(), hasTrigger() (+43 more)
-
-### Community 5 - "Maxim App Driver on Emulator"
-Cohesion: 0.14
-Nodes (39): ref_child_process, ref_util, checkOngkir(), cleanText(), ensureCity(), ensureMaximOpen(), findCityDialogButton(), getPointButtons() (+31 more)
-
-### Community 6 - "Auto Rekap Orchestration"
-Cohesion: 0.11
-Nodes (21): c_project_whatsapp_bot_src_keuangan_keuangantrigger_getkeuangancommand, c_project_whatsapp_bot_src_keuangan_pengeluaranparser_collectrecapexpenses, c_project_whatsapp_bot_src_shared_groupresolver_resolvegroupid, c_project_whatsapp_bot_src_shared_recapsummary_resolvesummarygroupid, { collectAiExpenses }, { collectJualanIncome }, { collectManualExpenses, collectOfflineIncome }, { collectRecapExpenses } (+13 more)
-
-### Community 7 - "Finance Spreadsheet Ledger"
+### Community 3 - "kiloHandler.js"
 Cohesion: 0.12
-Nodes (30): Bentuk spreadsheet: buku jurnal, bukan satu baris per hari, Penarikan menggantung (timeout 120 detik), Tiga pengaman penarikan dana, Menjalankan perintah dua kali (penulisan idempoten), diffLabeledExpenses(), diffOfflineAmounts(), findDayBlock(), { getAccessToken } (+22 more)
+Nodes (22): c_project_whatsapp_bot_src_kilo_kilotrigger_getkilocommand, c_project_whatsapp_bot_src_kilo_kilotrigger_issupportedimage, c_project_whatsapp_bot_src_shared_progressreporter_createprogressreporter, { BilasError }, buildReply(), { compareKilo }, { createProgressReporter }, describeFailure() (+14 more)
 
-### Community 8 - "Package Manifest and Dependencies"
+### Community 4 - "videoNoiseHandler.js"
 Cohesion: 0.07
-Nodes (27): dependencies, @anthropic-ai/bedrock-sdk, dotenv, nodemon, @wppconnect-team/wppconnect, description, engines, node (+19 more)
+Nodes (39): Engine afftdn (DSP klasik), Engine arnndn (RNNoise), npm run banding:noise (bandingkan sumber mana pun), Engine DeepFilterNet, Plafon matematis parameter mix, Noise reduction video, npm run uji:noise (A/B setelan denoise), VIDEO_DENOISE_POLISH (+31 more)
 
-### Community 9 - "Bot Entry Point Wiring"
-Cohesion: 0.05
-Nodes (39): c_project_whatsapp_bot_src_ongkir_ongkirhandler_handleongkircommand, c_project_whatsapp_bot_src_replies_keywordreplies_findreply, c_project_whatsapp_bot_src_replies_keywordreplies_normalizekeyword, c_project_whatsapp_bot_src_replies_keywordreplies_replies, c_project_whatsapp_bot_src_replies_locationreplies_findlocationreply, c_project_whatsapp_bot_src_replies_paymentreplies_findpaymentreply, c_project_whatsapp_bot_src_replies_welcomemessage_createwelcomelistoptions, c_project_whatsapp_bot_src_replies_welcomemessage_createwelcomemessage (+31 more)
-
-### Community 10 - "AI Expense Note Parsing"
+### Community 5 - "mumuClient.js"
 Cohesion: 0.15
-Nodes (20): c_project_whatsapp_bot_src_keuangan_pengeluaranparser_parsesummarytext, c_project_whatsapp_bot_src_shared_recapsummary_config, amountAppearsInText(), { AnthropicBedrock }, buildHandledPatterns(), buildUserMessage(), { businessYmd }, collectAiExpenses() (+12 more)
+Nodes (38): ref_util, checkOngkir(), cleanText(), ensureCity(), ensureMaximOpen(), findCityDialogButton(), getPointButtons(), getPointTitle() (+30 more)
+
+### Community 6 - "keuanganHandler.js"
+Cohesion: 0.10
+Nodes (24): c_project_whatsapp_bot_src_keuangan_keuangantrigger_getkeuangancommand, c_project_whatsapp_bot_src_keuangan_offlineparser_collectmanualexpenses, c_project_whatsapp_bot_src_keuangan_offlineparser_collectofflineincome, c_project_whatsapp_bot_src_keuangan_pengeluaranparser_collectrecapexpenses, c_project_whatsapp_bot_src_shared_recapsummary_resolvesummarygroupid, collectJualanIncome(), buildReply(), { collectAiExpenses } (+16 more)
+
+### Community 7 - "keuanganSheet.js"
+Cohesion: 0.11
+Nodes (33): Bentuk spreadsheet: buku jurnal, bukan satu baris per hari, Penarikan menggantung (timeout 120 detik), Tiga pengaman penarikan dana, Menjalankan perintah dua kali (penulisan idempoten), deleteRows(), diffLabeledExpenses(), diffOfflineAmounts(), findDayBlock() (+25 more)
+
+### Community 8 - "package.json"
+Cohesion: 0.07
+Nodes (29): dependencies, @anthropic-ai/bedrock-sdk, dotenv, nodemon, puppeteer, @wppconnect-team/wppconnect, description, engines (+21 more)
+
+### Community 9 - "index.js"
+Cohesion: 0.04
+Nodes (44): c_project_whatsapp_bot_src_kilo_bilasclient_createbilasclient, c_project_whatsapp_bot_src_kilo_kilohandler_handlekilocommand, c_project_whatsapp_bot_src_ongkir_ongkirhandler_handleongkircommand, c_project_whatsapp_bot_src_replies_keywordreplies_findreply, c_project_whatsapp_bot_src_replies_keywordreplies_normalizekeyword, c_project_whatsapp_bot_src_replies_keywordreplies_replies, c_project_whatsapp_bot_src_replies_locationreplies_findlocationreply, c_project_whatsapp_bot_src_replies_paymentreplies_findpaymentreply (+36 more)
+
+### Community 10 - "aiPengeluaranParser.js"
+Cohesion: 0.12
+Nodes (23): c_project_whatsapp_bot_src_keuangan_offlineparser_createamountpattern, c_project_whatsapp_bot_src_keuangan_offlineparser_getauthorlabel, c_project_whatsapp_bot_src_keuangan_pengeluaranparser_parsesummarytext, c_project_whatsapp_bot_src_shared_recapsummary_config, amountAppearsInText(), { AnthropicBedrock }, buildHandledPatterns(), buildUserMessage() (+15 more)
 
 ### Community 11 - "Styrofoam Box Price List"
 Cohesion: 0.13
@@ -167,9 +178,9 @@ Nodes (19): findDimension(), findInSection(), getBoxLookup(), getHargaTerbaruShe
 Cohesion: 0.14
 Nodes (20): Bot price-list reply asset (WhatsApp auto-reply image), Sterofoam Box Lakban Warna + Aluminium (product line), Price List Image: Katalog & Daftar Harga Box Warna, Pengiriman Semarang (delivery coverage), Price tier: Lakban Warna (colored tape only), Price tier: Lakban Warna + Aluminium (tape + foil lining), Ukuran Luar Box (outer dimensions P x L x T, cm), Box 10 kg - 51x34x16 - Rp50,000 / Rp114,000 (+12 more)
 
-### Community 14 - "Feature Rationale and Engine Choices"
-Cohesion: 0.13
-Nodes (20): Engine afftdn (DSP klasik), Engine arnndn (RNNoise), npm run banding:noise (bandingkan sumber mana pun), Cek kilo (foto catatan vs report Bilas), Cek ongkir (tarif pengiriman Maxim), Engine DeepFilterNet, Plafon matematis parameter mix, Noise reduction video (+12 more)
+### Community 14 - "kiloTrigger.js"
+Cohesion: 0.09
+Nodes (39): c_project_whatsapp_bot_src_shared_recapmentionreply_normalizewhatsappid, botIsMentioned(), getKiloCommand(), getMentionedIds(), getQuotedMessageId(), getRawCommandText(), hasMentions(), hasTrigger() (+31 more)
 
 ### Community 15 - "Business Day and Rekap Trigger"
 Cohesion: 0.21
@@ -183,17 +194,17 @@ Nodes (19): Bot Price-List Image Reply (pl-* asset), Cara Pakai Baca Deskripsi P
 Cohesion: 0.15
 Nodes (19): Cake Bag (category 3, 4 sizes), Cake Bag Large 30x30x25 - Rp44.000, Cake Bag Medium 26x26x20 - Rp37.000, Cake Bag Reguler 25x19x13 - Rp33.000, Cake Bag XXL 30x30x35 - Rp56.000, Thermal Bag Catalog & Price List Image, Lunch Bag (category 1, 4 sizes), Lunch Bag Ekstra Small 27x12x11 - Rp28.000 (+11 more)
 
-### Community 18 - "Google Sheets API Client"
-Cohesion: 0.23
-Nodes (18): applyShopeeReferencePrices(), clearShopeePriceRows(), crypto, encodeBase64Url(), getAccessToken(), getRecapOutput(), getSheetValues(), getShopeePriceRows() (+10 more)
+### Community 18 - "googleSheets.js"
+Cohesion: 0.17
+Nodes (21): puppeteer, applyShopeeReferencePrices(), clearShopeePriceRows(), crypto, encodeBase64Url(), getAccessToken(), getRecapOutput(), getSheetValues() (+13 more)
 
 ### Community 19 - "PE Foam Price List"
 Cohesion: 0.16
 Nodes (18): PE Balok (foam block), Bot price-list reply asset (assets/pl-*.jpg sent to WhatsApp customers), Busa Karangan Bunga 20x10 cm tebal 5 cm - Ecer Rp9.000, Dash Mall (seller brand watermark), Katalog & Daftar Harga PE Foam (price-list image), PE Foam Lembaran 0,5 x 1 meter (sheet), Lembaran tebal 1 cm - Ecer Rp36.000 / Bundling 4pcs Rp108.000, Lembaran tebal 2 cm - Ecer Rp72.000 / Bundling 4pcs Rp216.000 (+10 more)
 
-### Community 20 - "Shopee Price Sync"
-Cohesion: 0.20
-Nodes (16): { buildSyncReport, syncShopeePrices }, applyUpdates(), buildStatusText(), buildSyncReport(), chunk(), { createShopeeClient }, delay(), fetchItemInfo() (+8 more)
+### Community 20 - "shopeePriceSync.js"
+Cohesion: 0.21
+Nodes (15): { buildSyncReport, syncShopeePrices }, applyUpdates(), buildStatusText(), buildSyncReport(), chunk(), { createShopeeClient }, delay(), fetchItemInfo() (+7 more)
 
 ### Community 21 - "Shopee OAuth Token Store"
 Cohesion: 0.21
@@ -223,9 +234,9 @@ Nodes (14): Cara mapping harga bekerja, Autorisasi Shopee (token store), Sinkron
 Cohesion: 0.21
 Nodes (13): { buildImportReport, importShopeePrices }, buildImportReport(), buildModelName(), chunk(), { createShopeeClient }, fetchAllItemIds(), { formatSyncTime }, getItemStatuses() (+5 more)
 
-### Community 28 - "Sales Book Photo Reading"
-Cohesion: 0.19
-Nodes (15): { AnthropicBedrock }, { businessYmd }, collectJualanIncome(), config, extractJsonObject(), getClient(), { getMessageTimestampMs, parseIndonesianNumber }, { isBotGeneratedMessage } (+7 more)
+### Community 28 - "jualanParser.js"
+Cohesion: 0.15
+Nodes (17): c_project_whatsapp_bot_src_keuangan_offlineparser_getmessagetimestampms, { AnthropicBedrock }, { businessYmd }, config, DAY_NAMES_ID, extractJsonObject(), getClient(), { getMessageTimestampMs, parseIndonesianNumber } (+9 more)
 
 ### Community 29 - "Order Recap Message Parser"
 Cohesion: 0.24
@@ -247,9 +258,9 @@ Nodes (10): WhatsApp bot price-list reply asset, Dash Mall (seller brand on pric
 Cohesion: 0.36
 Nodes (10): Dash Mall (Shop Brand), Delivery via Grab / Gojek, Price List Image: Sterofoam Cutter, Model 2: Pensil Solder 10 cm - Rp158.000, Model 3: Pensil Solder 25 cm - Rp190.000, Model 1: Pisau Kawat Segitiga - Rp70.000, WhatsApp Bot Price-List Reply Asset, Pemotong Sterofoam (Styrofoam Cutter) (+2 more)
 
-### Community 34 - "Recap Summary Expense Parser"
-Cohesion: 0.27
-Nodes (9): isRecapSummary(), { businessYmd }, collectRecapExpenses(), { config: summaryConfig }, { getMessageTimestampMs, parseIndonesianNumber }, matchLabeledAmount(), normalizeLabel(), parseSummaryText() (+1 more)
+### Community 34 - "pengeluaranParser.js"
+Cohesion: 0.25
+Nodes (10): isRecapSummary(), getMessageTimestampMs(), { businessYmd }, collectRecapExpenses(), { config: summaryConfig }, { getMessageTimestampMs, parseIndonesianNumber }, matchLabeledAmount(), normalizeLabel() (+2 more)
 
 ### Community 35 - "Styrofoam Glue Price List"
 Cohesion: 0.33
@@ -259,33 +270,33 @@ Nodes (9): Dash Mall (Brand / Toko), Price List Image: Lem Sterofoam, Kegunaan: 
 Cohesion: 0.46
 Nodes (8): GPN / ASPI QRIS Scheme Branding, QRIS Payment Code Image (qris.jpg), Merchant: Toko Dashmall Sterofoam - Stationary, Merchant Identifier Block (NMID, printer id, print version) - redacted, Bot Payment Reply Flow (send QRIS when customer asks how to pay), QRIS National QR Payment Standard, Scan-and-Pay Instruction Strip (buka aplikasi, scan & cek, bayar), Static Printed Merchant QR Card (terminal label A01)
 
-### Community 37 - "Shopee Price Mapping CLI"
-Cohesion: 0.29
-Nodes (6): { applyHargaTerbaru, buildMapReport }, {
+### Community 37 - "shopeePriceMap.js"
+Cohesion: 0.27
+Nodes (8): { applyHargaTerbaru, buildMapReport }, applyHargaTerbaru(), {
   applyShopeeReferencePrices,
   getShopeePriceRows,
   updateShopeeMappingColumns,
-}, buildMapReport(), { formatPrice }, { loadHargaTerbaru }, { mapShopeeProduct }
+}, buildMapReport(), { formatPrice }, { loadHargaTerbaru }, { mapShopeeProduct }, formatPrice()
 
 ### Community 38 - "Keyword Reply Matching"
 Cohesion: 0.32
 Nodes (7): getIncomingText(), isJobInquiry(), ASSET_DIR, findReply(), normalizeKeyword(), path, replies
 
-### Community 39 - "Offline Deposit Parsing"
-Cohesion: 0.21
-Nodes (13): c_project_whatsapp_bot_src_keuangan_businessday_businessymd, Aturan pembacaan nominal tanpa satuan, Setoran offline dari grup, { businessYmd }, collectLabeledAmounts(), collectManualExpenses(), collectOfflineIncome(), getAuthorLabel() (+5 more)
+### Community 39 - "offlineParser.js"
+Cohesion: 0.18
+Nodes (15): c_project_whatsapp_bot_src_keuangan_businessday_businessymd, Aturan pembacaan nominal tanpa satuan, Setoran offline dari grup, parseBookAmount(), { businessYmd }, collectLabeledAmounts(), collectManualExpenses(), collectOfflineIncome() (+7 more)
 
 ### Community 40 - "Welcome Menu Message"
 Cohesion: 0.47
 Nodes (4): createPrefilledWhatsAppLink(), createWelcomeMessage(), menuItems, normalizePhoneNumber()
 
-### Community 41 - "Recap Image Rendering"
-Cohesion: 0.50
-Nodes (4): ref_puppeteer, escapeHtml(), puppeteer, renderRecapJpg()
+### Community 41 - "notaHandler.js"
+Cohesion: 0.13
+Nodes (23): assetsDir, cache, fs, hasAsset(), path, listAliases(), baseFileName(), brandListText() (+15 more)
 
-### Community 42 - "Payment Reply Flow"
-Cohesion: 0.26
-Nodes (11): Auto rekap pemasukan & pengeluaran harian, Batas hari kerja (rekap lewat tengah malam), Rekap pesanan grup, Ringkasan otomatis ke grup lain, groupNotFound(), normalizeName(), resolveGroupId(), buildRecapSummary() (+3 more)
+### Community 42 - "squeezeSchedule.js"
+Cohesion: 0.08
+Nodes (36): c_project_whatsapp_bot_src_shared_groupresolver_resolvegroupid, Auto rekap pemasukan & pengeluaran harian, Batas hari kerja (rekap lewat tengah malam), Cek kilo (foto catatan vs report Bilas), Cek ongkir (tarif pengiriman Maxim), Otomasi aplikasi Maxim di MuMuPlayer, Pemendekan alamat dari link Google Maps, Rekap pesanan grup (+28 more)
 
 ### Community 43 - "Location Reply Flow"
 Cohesion: 0.83
@@ -294,6 +305,50 @@ Nodes (3): findLocationReply(), normalizeText(), shouldReplyAddress()
 ### Community 44 - "Video Job Queue"
 Cohesion: 0.67
 Nodes (3): createJobQueue(), push(), runNext()
+
+### Community 46 - "dashmall.js"
+Cohesion: 0.19
+Nodes (21): escapeHtml(), optionalDataUri(), formatNumber(), bankLines(), { formatNumber }, iconPhone(), iconPin(), itemRows() (+13 more)
+
+### Community 47 - "videoNoiseReduction.js"
+Cohesion: 0.10
+Nodes (18): attenLimitDb, deepFilterPostFilterBeta, defaultEngine, defaultMix, defaultNoiseReduction, defaultTimeoutMs, engines, escapeFilterValue() (+10 more)
+
+### Community 48 - "ref_path"
+Cohesion: 0.14
+Nodes (13): ref_child_process, ref_fs, ref_path, createWelcomeStore(), DATA_DIR, fs, loadWelcomedChats(), path (+5 more)
+
+### Community 49 - "kiloCompare.js"
+Cohesion: 0.26
+Nodes (15): assignPairs(), charSimilarity(), compareKilo(), DIGIT_LOOKALIKE, editDistance(), foldName(), HONORIFICS, isEligible() (+7 more)
+
+### Community 50 - "notaParser.js"
+Cohesion: 0.21
+Nodes (14): c_project_whatsapp_bot_src_keuangan_offlineparser_parseindonesiannumber, c_project_whatsapp_bot_src_keuangan_offlineparser_torupiah, isRealDate(), labelYmd(), limits, matchField(), MONTHS_ID, pad() (+6 more)
+
+### Community 51 - "bilasClient.js"
+Cohesion: 0.23
+Nodes (11): ref_crypto, BilasError, createBilasClient(), ensureSession(), getTransactions(), login(), resolveOutlet(), crypto (+3 more)
+
+### Community 52 - "notaRender.js"
+Cohesion: 0.20
+Nodes (12): chain, closeBrowser(), config, getBrowser(), isAlive(), puppeteer, { renderNotaHtml }, renderOnce() (+4 more)
+
+### Community 53 - "kiloPhotoReader.js"
+Cohesion: 0.33
+Nodes (9): { AnthropicBedrock }, BASE_PROMPT, buildNameHint(), buildPrompt(), coerceKilo(), extractJsonArray(), getClient(), KiloReadError (+1 more)
+
+### Community 54 - "reduceNoise"
+Cohesion: 0.44
+Nodes (9): buildAudioFilter(), buildPostFilters(), NoiseReductionError, pickAudioBitRate(), probeMedia(), reduceNoise(), reduceNoiseWithDeepFilter(), reduceNoiseWithVoiceCleaner() (+1 more)
+
+### Community 55 - "notaBrands.js"
+Cohesion: 0.43
+Nodes (7): buildDashMall(), builders, buildMarvel(), env(), envList(), listBrands(), resolveBrand()
+
+### Community 56 - "paymentReplies.js"
+Cohesion: 0.50
+Nodes (4): ASSET_DIR, containsWord(), findPaymentReply(), path
 
 ## Ambiguous Edges - Review These
 - `Unnamed box 26x17x27 - Rp52.000 / Rp57.000 / Rp102.000` → `Box Tanggung - 33x24x30 - Rp35.000 / Rp40.000 / Rp85.000`  [AMBIGUOUS]
@@ -318,13 +373,8 @@ Nodes (3): createJobQueue(), push(), runNext()
   assets/pl-lem-sterofoam.jpg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **284 isolated node(s):** `{
-  config,
-  formatRupiah,
-  getWithdrawRecord,
-  withdrawShopeeBalance,
-}`, `fs`, `wppconnect`, `{ findReply, normalizeKeyword, replies }`, `{ findLocationReply }` (+279 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 342 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **331 isolated node(s):** `name`, `version`, `description`, `main`, `start` (+326 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 394 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **1 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
