@@ -7,8 +7,8 @@
 //   3  | Ice Gel 1 lmbr        |  1  |       |  15.000  |  T
 //
 // T = Tunai, Q = QRIS. Fotonya dibaca Claude vision (klien Bedrock yang sama
-// dengan kiloPhotoReader), lalu dijumlahkan per metode bayar menjadi DUA baris
-// pemasukan di sheet: "Penjualan Tunai" dan "Penjualan QRIS".
+// dengan kiloPhotoReader), lalu tiap baris buku jadi satu baris pemasukan di
+// sheet: "Offline Tunai" atau "Offline Qris" menurut kolom T/Q-nya.
 //
 // Tiga hal yang membedakan pembacaan ini dari catatan teks di grup:
 //
@@ -16,9 +16,9 @@
 //      Aturan singkatan milik pesan teks ("105" -> Rp105.000) TIDAK berlaku di
 //      sini dan tidak boleh dipakai: satu salah baca "115.050" akan menjadi
 //      Rp115 juta kalau angkanya dikali seribu.
-//   2. Tanggal yang tertulis di kepala halaman dicocokkan dengan tanggal yang
-//      sedang direkap. Foto halaman hari lain yang terkirim ulang tidak boleh
-//      diam-diam menambah pemasukan hari ini.
+//   2. Tiap judul tanggal di halaman dicocokkan dengan tanggal yang sedang
+//      direkap. Satu halaman sering memuat sisa hari kemarin di atas dan hari
+//      ini di bawah; hanya bagian hari ini yang boleh menambah pemasukan.
 //   3. Foto yang bukan buku penjualan (mis. buku kilo laundry) dilewati - itu
 //      keputusan yang ikut ditanyakan ke model, bukan ditebak dari caption.
 
@@ -72,17 +72,26 @@ const PROMPT = [
   'berisi T atau Q (T = Tunai, Q = QRIS). Di kepala halaman biasanya ada',
   'tanggal, mis. "Kamis 17/9/26".',
   '',
+  'Satu halaman bisa berisi LEBIH DARI SATU hari: tiap hari diawali judul',
+  'tanggal sendiri di tengah halaman (mis. "Rabu 23/9/26" lalu di bawahnya',
+  '"Kamis 24/9/26"). Pisahkan baris per judul tanggal itu.',
+  '',
   'Kembalikan HANYA JSON, tanpa teks lain, tanpa blok kode markdown:',
-  '{"buku_penjualan": boolean, "tanggal_tertulis": string, "baris": [',
-  '  {"barang": string, "jumlah": number|null, "total": string,',
-  '   "bayar": "T"|"Q"|"", "yakin": boolean}]}',
+  '{"buku_penjualan": boolean, "bagian": [',
+  '  {"tanggal_tertulis": string, "baris": [',
+  '    {"barang": string, "jumlah": number|null, "total": string,',
+  '     "bayar": "T"|"Q"|"", "yakin": boolean}]}]}',
   '',
   'Aturan:',
   '- "buku_penjualan": false bila foto ini BUKAN buku penjualan barang',
   '  (mis. catatan kilo/laundry berisi nama pelanggan dan berat, struk,',
-  '  tangkapan layar, atau foto lain). Bila false, "baris" harus [].',
-  '- "tanggal_tertulis": tanggal di kepala halaman, disalin apa adanya',
-  '  ("Kamis 17/9/26"). Kosongkan "" bila tidak ada.',
+  '  tangkapan layar, atau foto lain). Bila false, "bagian" harus [].',
+  '- "bagian": satu objek per judul tanggal, urut dari atas ke bawah.',
+  '  Setiap baris masuk ke bagian judul tanggal TERDEKAT DI ATASNYA. Baris',
+  '  di atas judul tanggal pertama (lanjutan dari halaman sebelumnya) masuk',
+  '  bagian tersendiri dengan "tanggal_tertulis": "".',
+  '- "tanggal_tertulis": judul tanggal bagian itu, disalin apa adanya',
+  '  ("Kamis 17/9/26", "Rabu 23/9", "Rabu"). Kosongkan "" bila tidak ada.',
   '- "total": angka di kolom Total, DISALIN PERSIS seperti tertulis',
   '  ("45.000", "115.000"). Jangan dihitung, dijumlahkan, atau dibulatkan.',
   '  Jangan memakai kolom Harga bila kolom Total terisi.',
@@ -156,16 +165,35 @@ async function readJualanPhoto({ imageBase64, mediaType = 'image/jpeg' }, option
 
   return {
     bukuPenjualan: parsed.buku_penjualan === true,
-    tanggalTertulis: String(parsed.tanggal_tertulis || '').trim(),
-    baris: Array.isArray(parsed.baris) ? parsed.baris : [],
+    bagian: normalizeSections(parsed),
   };
 }
 
-// "Kamis 17/9/26" -> "2026-09-17". Bentuk lain dikembalikan null dan
-// pemeriksaan tanggalnya dilewati - lebih baik tidak memeriksa daripada
-// menolak foto yang benar karena format tanggalnya tak terduga.
-function parseWrittenDate(rawText) {
-  const match = /(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{2,4})/.exec(String(rawText || ''));
+// Jawaban lama (satu tanggal + satu daftar baris) tetap diterima sebagai satu
+// bagian, supaya model yang mengabaikan bentuk "bagian" tidak membuang foto.
+function normalizeSections(parsed) {
+  const sections = Array.isArray(parsed?.bagian)
+    ? parsed.bagian
+    : [{ tanggal_tertulis: parsed?.tanggal_tertulis, baris: parsed?.baris }];
+
+  return sections
+    .map((section) => ({
+      tanggalTertulis: String(section?.tanggal_tertulis || '').trim(),
+      baris: Array.isArray(section?.baris) ? section.baris : [],
+    }))
+    .filter((section) => section.baris.length);
+}
+
+const DAY_NAMES_ID = ['minggu', 'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sabtu'];
+
+// "Kamis 17/9/26" -> "2026-09-17". Tahun boleh tidak ditulis ("Rabu 23/9");
+// tahunnya diambil dari tanggal rekap (referenceYmd). Bentuk lain dikembalikan
+// null.
+function parseWrittenDate(rawText, referenceYmd) {
+  const text = String(rawText || '');
+  const full = /(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{2,4})/.exec(text);
+  const short = full ? null : /(?:^|\D)(\d{1,2})\s*[/-]\s*(\d{1,2})(?!\s*[/-]?\d)/.exec(text);
+  const match = full || short;
 
   if (!match) {
     return null;
@@ -173,14 +201,53 @@ function parseWrittenDate(rawText) {
 
   const day = Number(match[1]);
   const month = Number(match[2]);
-  const yearPart = Number(match[3]);
 
   if (!day || !month || month > 12 || day > 31) {
     return null;
   }
 
-  const year = yearPart < 100 ? 2000 + yearPart : yearPart;
+  let year;
+  if (full) {
+    const yearPart = Number(match[3]);
+    year = yearPart < 100 ? 2000 + yearPart : yearPart;
+  } else {
+    const refYear = Number(String(referenceYmd || '').slice(0, 4));
+    if (!refYear) {
+      return null;
+    }
+    // Rekap awal Januari yang membaca "31/12" milik tahun sebelumnya.
+    const refMonth = Number(String(referenceYmd).slice(5, 7));
+    year = month > refMonth + 6 ? refYear - 1 : refYear;
+  }
+
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// "Rabu" -> 3 (Minggu = 0). Dipakai bila judulnya hanya nama hari.
+function parseWrittenWeekday(rawText) {
+  const text = String(rawText || '').toLowerCase().replace(/jum'?at/g, 'jumat');
+  const index = DAY_NAMES_ID.findIndex((name) => new RegExp(`\\b${name}\\b`).test(text));
+  return index >= 0 ? index : null;
+}
+
+/**
+ * Apakah judul tanggal sebuah bagian cocok dengan tanggal yang direkap.
+ * true/false bila bisa diputuskan, null bila judulnya tidak terbaca sama sekali
+ * - lebih baik tidak memeriksa daripada menolak foto yang benar karena format
+ * tanggalnya tak terduga.
+ */
+function matchesTargetDate(rawText, targetDate) {
+  const writtenDate = parseWrittenDate(rawText, targetDate);
+  if (writtenDate) {
+    return writtenDate === targetDate;
+  }
+
+  const weekday = parseWrittenWeekday(rawText);
+  if (weekday !== null) {
+    return new Date(`${targetDate}T12:00:00Z`).getUTCDay() === weekday;
+  }
+
+  return null;
 }
 
 // Angka di buku ditulis penuh ("45.000" = Rp45.000). Titik hanya pemisah
@@ -267,6 +334,11 @@ async function collectJualanIncome(messages, options = {}) {
     qris: 0,
     rows: [],
     photos: 0,
+    // Jumlah foto yang DIPERIKSA, terpisah dari yang ternyata buku penjualan.
+    // Tanpa angka ini, foto yang dinilai bukan buku penjualan hilang tanpa
+    // jejak dari balasan - orang mengira fotonya tidak pernah terbaca.
+    candidates: 0,
+    notBook: 0,
     rejected: [],
     mismatched: [],
     skipped: true,
@@ -288,10 +360,12 @@ async function collectJualanIncome(messages, options = {}) {
     return { ...empty, skipped: false };
   }
 
+
   const rows = [];
   const rejected = [];
   const mismatched = [];
   let readCount = 0;
+  let notBookCount = 0;
 
   for (const message of photos) {
     let page;
@@ -313,19 +387,40 @@ async function collectJualanIncome(messages, options = {}) {
     }
 
     if (!page.bukuPenjualan) {
+      // Dihitung, bukan didiamkan: satu permintaan vision sudah terpakai untuk
+      // foto ini, dan orang harus tahu fotonya dilihat lalu ditolak.
+      notBookCount += 1;
       continue;
     }
 
     readCount += 1;
 
-    // Tanggal di kepala halaman harus cocok dengan yang sedang direkap.
-    const writtenDate = parseWrittenDate(page.tanggalTertulis);
-    if (options.targetDate && writtenDate && writtenDate !== options.targetDate) {
-      mismatched.push({ tanggal: page.tanggalTertulis, baris: page.baris.length });
-      continue;
-    }
+    // Judul tanggal tiap bagian harus cocok dengan yang sedang direkap. Satu
+    // halaman sering berisi sisa hari kemarin di atas dan hari ini di bawah;
+    // hanya bagian hari ini yang dihitung.
+    const verdicts = page.bagian.map((section) =>
+      options.targetDate ? matchesTargetDate(section.tanggalTertulis, options.targetDate) : true
+    );
+    const hasDatedSection = verdicts.some((verdict) => verdict !== null);
 
-    page.baris.forEach((row) => {
+    const sections = page.bagian.filter((section, index) => {
+      const verdict = verdicts[index];
+      if (verdict === false) {
+        mismatched.push({ tanggal: section.tanggalTertulis, baris: section.baris.length });
+        return false;
+      }
+
+      // Bagian tanpa judul di halaman yang juga memuat judul tanggal adalah
+      // lanjutan halaman sebelumnya - bukan milik hari ini.
+      if (verdict === null && hasDatedSection) {
+        mismatched.push({ tanggal: section.tanggalTertulis || '(tanpa tanggal)', baris: section.baris.length });
+        return false;
+      }
+
+      return true;
+    });
+
+    sections.flatMap((section) => section.baris).forEach((row) => {
       const barang = String(row?.barang || '').replace(/\s+/g, ' ').trim().slice(0, 60);
       const amount = parseBookAmount(row?.total);
       const bayar = String(row?.bayar || '').trim().toUpperCase();
@@ -367,6 +462,8 @@ async function collectJualanIncome(messages, options = {}) {
     qris: rows.filter((row) => row.bayar === 'Q').reduce((sum, row) => sum + row.amount, 0),
     rows,
     photos: readCount,
+    candidates: photos.length,
+    notBook: notBookCount,
     rejected,
     mismatched,
     skipped: false,
@@ -378,8 +475,10 @@ module.exports = {
   PROMPT,
   collectJualanIncome,
   config,
+  matchesTargetDate,
   parseBookAmount,
   parseWrittenDate,
+  parseWrittenWeekday,
   readJualanPhoto,
   selectPhotos,
 };

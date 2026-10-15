@@ -1686,6 +1686,45 @@ async function performWithdraw(page, onProgress, expectedAmount, options = {}) {
   );
 }
 
+// Profil ini menyimpan sesi tab, dan Chrome memulihkan tab run sebelumnya
+// (biasanya halaman Tarik Dana kemarin) di samping tab baru. Urutan
+// browser.pages() tidak dijamin, jadi bot bisa mengendalikan tab lama yang
+// tersembunyi di belakang - halaman Shopee di tab itu tidak dirender dan alurnya
+// macet sampai tabnya dipindah ke depan dengan tangan. Snapshot sesinya dihapus
+// sebelum launch; cookie login disimpan di berkas lain, jadi tidak ikut hilang.
+function clearRestoredTabs() {
+  const defaultDir = path.join(PROFILE_DIR, 'Default');
+  const targets = [
+    path.join(defaultDir, 'Sessions'),
+    // Nama berkas sesi di Chrome versi lama.
+    ...['Current Session', 'Current Tabs', 'Last Session', 'Last Tabs'].map((name) =>
+      path.join(defaultDir, name)
+    ),
+  ];
+
+  for (const target of targets) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`Gagal menghapus sesi tab lama ${target}: ${error.message}`);
+    }
+  }
+}
+
+// Pengaman kedua kalau tab lama tetap terpulihkan: pakai satu tab saja, tutup
+// sisanya, lalu bawa tab itu ke depan supaya halamannya benar-benar dirender.
+async function takeSingleTab(browser) {
+  const pages = await browser.pages();
+  const page =
+    pages.find((candidate) => candidate.url() === 'about:blank') || (await browser.newPage());
+
+  await Promise.all(
+    pages.filter((other) => other !== page).map((other) => other.close().catch(() => {}))
+  );
+  await page.bringToFront();
+  return page;
+}
+
 /**
  * Tarik saldo Shopee sekali untuk satu tanggal, lalu kembalikan nominalnya.
  *
@@ -1725,6 +1764,7 @@ async function withdrawShopeeBalance(options = {}) {
     }
 
     fs.mkdirSync(PROFILE_DIR, { recursive: true });
+    clearRestoredTabs();
 
     const browser = await puppeteer.launch({
       headless: config.headless,
@@ -1740,7 +1780,7 @@ async function withdrawShopeeBalance(options = {}) {
     });
 
     try {
-      const page = (await browser.pages())[0] || (await browser.newPage());
+      const page = await takeSingleTab(browser);
       page.setDefaultTimeout(config.navigationTimeoutMs);
       await page.setViewport({ width: 1440, height: 1000 });
 
@@ -1844,6 +1884,7 @@ async function withdrawShopeeBalance(options = {}) {
 
 module.exports = {
   PROFILE_DIR,
+  clearRestoredTabs,
   clickButtonByText,
   dumpPinDialog,
   findPinInputs,
@@ -1865,5 +1906,6 @@ module.exports = {
   performWithdraw,
   readBalance,
   selectors,
+  takeSingleTab,
   withdrawShopeeBalance,
 };

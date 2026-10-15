@@ -30,6 +30,7 @@ const {
 const { parseSummaryText } = require('./pengeluaranParser');
 const { config: summaryConfig } = require('../shared/recapSummary');
 const { isBotGeneratedMessage } = require('../shared/botOutput');
+const { hasTrigger: isNotaCommand } = require('../nota/notaTrigger');
 
 // Pola yang sudah ditangani deterministik. Dibuat baru di sini (bukan dipakai
 // bersama) karena pola global menyimpan lastIndex - berbagi instance membuat
@@ -173,6 +174,13 @@ function selectCandidates(messages, options = {}) {
     // dan ringkasan dua baris tidak akan dikenali lagi setelah digabung.
     const handled = buildHandledPatterns().some((pattern) => pattern.test(text));
     if (handled || isRecapSummary(rawText)) {
+      return;
+    }
+
+    // Perintah nota memuat harga tiap item ("1 | Box 37 lakban | 50000"). Itu
+    // penjualan ke pelanggan, bukan belanja - kalau ikut dinilai, tiap nota
+    // yang dibuat di grup rekap akan tercatat sebagai pengeluaran.
+    if (isNotaCommand(rawText)) {
       return;
     }
 

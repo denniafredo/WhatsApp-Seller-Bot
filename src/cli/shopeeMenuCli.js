@@ -16,8 +16,10 @@ const fs = require('fs');
 const puppeteer = require('puppeteer');
 const {
   PROFILE_DIR,
+  clearRestoredTabs,
   config,
   detectLoginState,
+  takeSingleTab,
   waitForUrlSettled,
 } = require('../keuangan/shopeeWithdrawClient');
 
@@ -61,6 +63,7 @@ async function main() {
   console.log(`Pantau   : ${watchMinutes} menit (ubah dengan: npm run cek:menu -- 10)`);
   console.log('');
 
+  clearRestoredTabs();
   const browser = await puppeteer.launch({
     // Selalu terlihat: inti perintah ini adalah kamu mengeklik sendiri.
     headless: false,
@@ -75,7 +78,7 @@ async function main() {
   });
 
   try {
-    const page = (await browser.pages())[0] || (await browser.newPage());
+    const page = await takeSingleTab(browser);
     await page.setViewport({ width: 1440, height: 1000 });
 
     console.log('Membuka Seller Centre...');

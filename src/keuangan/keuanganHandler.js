@@ -198,26 +198,46 @@ function buildReply({
   // ketahuan sebelum orang membuka spreadsheet.
   const jual = jualan || { rows: [], rejected: [], mismatched: [] };
 
-  if (jual.photos || jual.rows.length || (jual.skipped && jual.reason)) {
+  // Cukup ADA foto yang diperiksa untuk memunculkan bagian ini. Kalau syaratnya
+  // foto yang lolos jadi buku penjualan, foto yang ditolak model hilang diam-diam
+  // dan orang mengira fotonya tidak pernah sampai.
+  if (jual.candidates || jual.photos || jual.rows.length || (jual.skipped && jual.reason)) {
+    const candidates = jual.candidates || 0;
+    const header =
+      candidates && candidates !== jual.photos
+        ? `Penjualan barang (${jual.photos || 0} buku penjualan dari ${candidates} foto diperiksa):`
+        : `Penjualan barang (${jual.photos || 0} foto buku):`;
+
     lines.push('');
-    lines.push(`Penjualan barang (${jual.photos || 0} foto buku):`);
+    lines.push(header);
 
-    sheet.incomes.forEach((income) => {
+    // sheet.jualan sejajar dengan jual.rows (urutan buku), jadi tiap baris
+    // sheet bisa ditampilkan bersama nama barangnya.
+    jual.rows.forEach((row, index) => {
+      const written = (sheet.jualan || [])[index];
+      const label = written?.label || (row.bayar === 'Q' ? 'QRIS' : 'Tunai');
       lines.push(
-        `  • ${income.label}: *${formatRupiah(income.amount)}* _(${describeRowAction(income)})_`
-      );
-    });
-
-    (sheet.incomesZero || []).forEach((income) => {
-      lines.push(`  • ${income.label}: Rp0 _(tidak ditulis)_`);
-    });
-
-    jual.rows.forEach((row) => {
-      lines.push(
-        `    - ${row.barang}: ${formatRupiah(row.amount)} ${row.bayar === 'Q' ? '(QRIS)' : '(tunai)'}` +
+        `  • ${label}: *${formatRupiah(row.amount)}* — ${row.barang}` +
+          (written ? ` _(${describeRowAction(written)})_` : '') +
           (row.yakin ? '' : ' ⚠️ _ragu baca_')
       );
     });
+
+    if (jual.rows.length) {
+      lines.push(
+        `  _Total: tunai ${formatRupiah(jual.tunai)}, QRIS ${formatRupiah(jual.qris)}._`
+      );
+    }
+
+    if (sheet.jualanRemoved) {
+      lines.push(`  _${sheet.jualanRemoved} baris penjualan lama dihapus (tidak ada lagi di buku)._`);
+    }
+
+    if (jual.notBook) {
+      lines.push(
+        `  _${jual.notBook} foto dinilai bukan buku penjualan, tidak dihitung._`
+      );
+    }
 
     if (jual.skipped && jual.reason) {
       lines.push(`  _pembacaan foto dilewati: ${jual.reason}._`);
@@ -225,7 +245,7 @@ function buildReply({
 
     jual.mismatched.forEach((item) => {
       lines.push(
-        `  _satu foto dilewati: tanggal di bukunya "${item.tanggal}", bukan ${command.dateLabel}._`
+        `  _${item.baris} baris bertanggal "${item.tanggal}" dilewati, bukan ${command.dateLabel}._`
       );
     });
 
@@ -313,7 +333,8 @@ function buildReply({
   const nothingChanged =
     !sheet.rowsAdded &&
     sheet.shopeeAction !== 'updated' &&
-    !sheet.incomes.some((income) => income.action === 'updated') &&
+    !(sheet.jualan || []).some((item) => item.action === 'updated') &&
+    !sheet.jualanRemoved &&
     !sheet.expenses.some((expense) => expense.action === 'updated');
 
   if (nothingChanged) {
@@ -399,6 +420,8 @@ async function runKeuanganJob(client, message, command, deps, reporter) {
       qris: 0,
       rows: [],
       photos: 0,
+      candidates: 0,
+      notBook: 0,
       rejected: [],
       mismatched: [],
       skipped: true,
@@ -437,10 +460,8 @@ async function runKeuanganJob(client, message, command, deps, reporter) {
     shopeeAmount: shopee.amount,
     shopeeSkipped: shopee.skipped,
     offlineAmounts: offline.entries.map((item) => item.amount),
-    incomes: [
-      { kind: 'jualanTunai', amount: jualan.tunai },
-      { kind: 'jualanQris', amount: jualan.qris },
-    ],
+    // Satu baris sheet per baris buku ("Offline Tunai" / "Offline Qris").
+    jualanRows: jualan.rows.map((row) => ({ bayar: row.bayar, amount: row.amount })),
     expenses: expenses.entry
       ? [
           { kind: 'kulakan', amount: expenses.entry.kulakan },

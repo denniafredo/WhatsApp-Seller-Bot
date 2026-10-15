@@ -14,10 +14,13 @@ const { createJobQueue } = require('./video/videoJobQueue');
 const { handleNoiseCommand } = require('./video/videoNoiseHandler');
 const { handleKiloCommand } = require('./kilo/kiloHandler');
 const { handleOngkirCommand } = require('./ongkir/ongkirHandler');
+const { handleNotaCommand } = require('./nota/notaHandler');
 const { handleKeuanganCommand } = require('./keuangan/keuanganHandler');
 const { createBilasClient } = require('./kilo/bilasClient');
 const { config: recapSummaryConfig, sendRecapSummary } = require('./shared/recapSummary');
 const { watchBotMessages } = require('./shared/botOutput');
+const { handleSqueezeCommand } = require('./squeeze/squeezeHandler');
+const { startSqueezeSchedule } = require('./squeeze/squeezeSchedule');
 
 const sessionName = process.env.WPP_SESSION || 'business-bot';
 const businessPhoneNumber = process.env.BUSINESS_PHONE || '';
@@ -84,6 +87,9 @@ function start(client) {
   // hampir selalu perintah yang diulang, bukan pekerjaan baru.
   const keuanganJobQueue = createJobQueue({ concurrency: 1, maxPending: 1 });
   const bilas = createBilasClient();
+
+  // Laporan sinyal crypto harian ke grup SQUEEZE_SIGNAL_GROUP_NAME (default "cstv").
+  startSqueezeSchedule(client);
 
   const getLoggedInWhatsAppIds = async () => {
     if (!loggedInWhatsAppIds) {
@@ -153,6 +159,19 @@ function start(client) {
         return;
       }
 
+      const notaHandledGroup = await handleNotaCommand(client, message, {
+        getBotIds: getLoggedInWhatsAppIds,
+        isGroup: true,
+        timeZone: recapTimeZone,
+      }).catch((error) => {
+        console.error(`Failed to handle nota (group) from ${message.from}:`, error);
+        return false;
+      });
+
+      if (notaHandledGroup) {
+        return;
+      }
+
       const keuanganHandledGroup = await handleKeuanganCommand(client, message, {
         queue: keuanganJobQueue,
         getBotIds: getLoggedInWhatsAppIds,
@@ -165,6 +184,18 @@ function start(client) {
       });
 
       if (keuanganHandledGroup) {
+        return;
+      }
+
+      const squeezeHandledGroup = await handleSqueezeCommand(client, message, {
+        getBotIds: getLoggedInWhatsAppIds,
+        isGroup: true,
+      }).catch((error) => {
+        console.error(`Failed to handle squeeze signal (group) from ${message.from}:`, error);
+        return false;
+      });
+
+      if (squeezeHandledGroup) {
         return;
       }
 
@@ -315,6 +346,21 @@ function start(client) {
     });
 
     if (ongkirHandled) {
+      return;
+    }
+
+    // Di atas getIncomingText supaya perintah nota tidak ikut memicu menu
+    // sambutan untuk pelanggan baru.
+    const notaHandled = await handleNotaCommand(client, message, {
+      getBotIds: getLoggedInWhatsAppIds,
+      isGroup: false,
+      timeZone: recapTimeZone,
+    }).catch((error) => {
+      console.error(`Failed to handle nota from ${message.from}:`, error);
+      return false;
+    });
+
+    if (notaHandled) {
       return;
     }
 

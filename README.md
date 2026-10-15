@@ -330,6 +330,85 @@ Screenshot hasilnya ditulis ke `data/ongkir-terakhir.png`.
 
 Konfigurasi `.env`: `MUMU_DIR`, `MUMU_VM_INDEX`, `MUMU_BOOT_TIMEOUT_MS`, `MAXIM_PACKAGE`, `MAXIM_CATEGORY`, `MAXIM_CITY`, `ONGKIR_LINK_TIMEOUT_MS`, `ONGKIR_MENU_MODE`, `ONGKIR_SESSION_TTL_MS`, dan alias `ONGKIR_ORIGIN_<NAMA>`. Lihat `.env.example`.
 
+## Nota digital (PDF + JPG)
+
+Bikin nota pembayaran langsung dari chat. Bot membalas **dua file**: JPG (langsung kelihatan di chat) dan PDF (yang diteruskan ke pelanggan, teksnya vektor jadi tajam kalau dicetak).
+
+```
+@bot nota marvel
+nama: Bu Sari
+tgl: 2026-09-22
+
+1 | Box 37 lakban | 50000
+2 | Ice pack | 30rb
+1 | PE foam 5mm | 125.000
+```
+
+Di **grup**, wajib mention bot. Di **chat pribadi** cukup `nota` di baris pertama. Kata `nota` harus jadi **awal baris pertama** — "notanya mana bos" tidak memicu apa-apa.
+
+### Toko
+
+Kata sesudah `nota` memilih tokonya. Kalau tidak ditulis, dipakai Dash Mall.
+
+| Ketik | Toko | Kertas | Bentuk notanya |
+|---|---|---|---|
+| `nota` atau `nota dashmall` | Dash Mall | A5 | 4 kolom (Jumlah, Nama Item, Harga, Total), ada kolom Nama pelanggan |
+| `nota marvel` | Marvel Sterofoam | A6 | 4 kolom (Jml, Nama Barang, Harga, Total), tanpa kolom Nama |
+
+Nama toko yang salah ketik **dihentikan dengan pesan kesalahan**, tidak diam-diam jatuh ke toko default — nota toko yang salah terlanjur terkirim ke pelanggan jauh lebih sulit dibereskan.
+
+Nota Marvel tidak punya kolom Nama pelanggan — kopnya cuma tanggal dan alamat toko — jadi `nama:` untuk Marvel **diabaikan seluruhnya**: tidak muncul di nota, tidak ikut ke nama file, dan tidak diributkan di balasan.
+
+Toko baru ditambahkan di [`src/nota/notaBrands.js`](src/nota/notaBrands.js); kalau bentuk notanya beda, templatenya ditambahkan di [`src/nota/templates/`](src/nota/templates/).
+
+### Format barisnya
+
+| Baris | Wajib? | Catatan |
+|---|---|---|
+| `nama: <pelanggan>` | tidak | Dash Mall saja; kalau dilewati kolom Nama dibiarkan kosong seperti nota cetak. Diabaikan untuk Marvel |
+| `tgl: <tanggal>` | tidak | default hari ini. Terima `2026-09-22`, `22-09-2026`, `22/9/2026` |
+| `<jumlah> \| <nama item> \| <harga>` | ya, minimal satu | tepat dua tanda `\|` |
+
+Pemisah `|` dipakai supaya nama item boleh memuat angka (`Box 37`, `PE foam 5mm`) tanpa parser menebak angka mana yang harga. Baris lain di sekitar formatnya diabaikan.
+
+Kolom **No:** sengaja dibiarkan kosong — tidak ada nomor urut yang disimpan, dan nota yang sudah dikirim tidak diarsipkan.
+
+### Cara harga dibaca
+
+Angkanya dibaca pakai `parseIndonesianNumber`/`toRupiah` milik auto rekap, tapi dengan **ambang yang berbeda** — dan bedanya penting:
+
+| Ditulis | Jadi | Kenapa |
+|---|---|---|
+| `50000`, `50.000`, `1.250.000` | apa adanya | ditulis penuh |
+| `8500`, `12500`, `2500` | apa adanya | harga satuan wajar (ice gel Rp8.500), **bukan** 8,5 juta |
+| `30rb`, `30 ribu`, `1jt` | 30.000 / 1.000.000 | satuannya eksplisit |
+| `50`, `85` | 50.000 / 85.000 | di bawah Rp1.000 tidak ada barang di sini |
+
+Aturan auto rekap menganggap angka yang bukan kelipatan 1000 sebagai singkatan, jadi di sana `8500` berarti 8.500.000 — benar untuk catatan belanja, tapi menghancurkan nota. Di nota ambangnya Rp1.000: di atas itu apa adanya, di bawah itu dikali 1000.
+
+Harga yang masuk kategori terakhir (dikali 1000 tanpa ditulis satuannya) **dikonfirmasi ulang di caption balasan**, supaya angka yang nanti dibaca pelanggan tidak pernah cuma hasil tebakan yang diam-diam benar.
+
+### Kalau ada baris yang salah
+
+Baris yang memuat `|` tapi bentuknya salah **selalu dilaporkan**, bukan dilewati diam-diam:
+
+```
+Baris yang tidak masuk nota:
+• Baris 3: jumlah "x" bukan angka 1-9999.
+```
+
+Nota tetap dikirim untuk baris yang benar. Kalau tidak ada satu pun item yang terbaca, bot membalas contoh formatnya.
+
+### Aset dan konfigurasi
+
+Logo dan tanda tangan tiap toko dibaca dari `assets/nota-<toko>-logo.png` dan `assets/nota-<toko>-ttd.png`, ditempel sebagai data URI (halaman dibuat lewat `setContent()` yang tidak punya base URL, jadi path file relatif tidak akan pernah termuat).
+
+Aset yang **belum ada tidak membuat nota gagal**: logo diganti tulisan nama toko, kolom tanda tangan dikosongkan, dan balasannya menyebut file mana yang masih kurang. Begitu filenya ditaruh, langsung terpakai tanpa perlu restart bot.
+
+Rendernya pakai puppeteer yang sudah dipakai rekap — satu Chrome dipakai bersama dan render dijalankan berurutan, jadi nota kedua dan seterusnya selesai di bawah setengah detik.
+
+Konfigurasi `.env` semuanya opsional, pola `NOTA_<TOKO>_<FIELD>` (misal `NOTA_MARVEL_PHONE`), plus `NOTA_JPG_SCALE` dan `NOTA_JPG_QUALITY` yang berlaku untuk semua toko. Lihat `.env.example`.
+
 ## Auto rekap (pemasukan & pengeluaran harian ke Google Sheet)
 
 Merekap satu hari ke spreadsheet "Shopee Summary", dari **empat sumber**:
@@ -605,6 +684,36 @@ Catatan selektor: `pinMarker` memakai `\bpin\b` dengan batas kata. Tanpa itu, `/
 Kalau bot melapor **"Tidak ada konfirmasi sukses setelah 120 detik"**, jangan ulangi perintahnya. Timeout bukan berarti gagal — permintaannya bisa sudah terkirim. Cek dulu di Seller Centre, karena catatan harian tidak ditandai sukses pada kasus ini dan perintah berikutnya **akan** menarik lagi.
 
 Konfigurasi `.env`: `KEUANGAN_SHEET_ID`, `KEUANGAN_SHEET_NAME`, `KEUANGAN_SHOPEE_LABEL`, `KEUANGAN_OFFLINE_LABEL`, `KEUANGAN_HEADER_ROWS`, `KEUANGAN_LAST_ROW`, `KEUANGAN_GROUP_NAME`, `KEUANGAN_GROUP_ID`, `KEUANGAN_HISTORY_COUNT`, `KEUANGAN_MAX_WITHDRAW`, `KEUANGAN_DRY_RUN`, `SHOPEE_SELLER_USERNAME`, `SHOPEE_SELLER_PASSWORD`, `SHOPEE_SELLER_BALANCE_URL`, `SHOPEE_SELLER_LOGIN_URL`, `SHOPEE_SELLER_HEADLESS`. Lihat `.env.example`.
+
+---
+
+## Sinyal crypto harian (MA Squeeze, Indodax)
+
+Setiap pagi bot mengirim laporan sinyal **MA Squeeze Daily v2** (MA 7/25/50/100 mengerucut, lalu breakout) untuk semua koin IDR di Indodax ke grup **"cstv"**:
+
+```
+*🟢 BUY - breakout kemarin (1)*
+FUELIDR  entry 14,53 | SL 13,24 (8.9%) | TP1 15,82 TP2 17,11 TP3 19,68
+
+*🟠 SIAP - pasang BUY STOP-LIMIT (0)*
+*🟡 Mengerucut - watchlist (9)*
+```
+
+Laporan bisa juga diminta manual: di grup mana saja, **mention bot** lalu tulis `signal squeeze`. Hasilnya dibalas ke grup itu.
+
+Logika sinyalnya tidak ada di bot ini. Bot menjalankan screener Python di project `tradingview` (`screener/indodax_squeeze_screener.py`) dan mengirim hasilnya apa adanya. Parameter dan filter koin diatur di `config.json` screener. Syaratnya Python 3.9+ terpasang (tanpa library tambahan) dan kedua project ada di folder yang bersebelahan, atau atur path-nya lewat `SQUEEZE_SCREENER_PATH`.
+
+| Variabel | Default | Guna |
+|---|---|---|
+| `SQUEEZE_SIGNAL_ENABLED` | `true` | `false` = laporan harian tidak dikirim (perintah manual tetap jalan) |
+| `SQUEEZE_SIGNAL_GROUP_NAME` | `cstv` | Nama grup tujuan |
+| `SQUEEZE_SIGNAL_GROUP_ID` | kosong | Id grup; menang atas nama kalau diisi |
+| `SQUEEZE_SIGNAL_TIME` | `07:10` | Jam kirim (HH:MM). Candle daily Indodax tutup 07:00 WIB |
+| `SQUEEZE_SIGNAL_TIMEZONE` | `Asia/Jakarta` | Zona waktu jam kirim |
+| `SQUEEZE_SCREENER_PATH` | `../tradingview/screener/indodax_squeeze_screener.py` | Lokasi screener |
+| `SQUEEZE_PYTHON` | `python` / `python3` | Perintah Python |
+
+Tanggal terakhir terkirim disimpan di `data/squeeze-signal-state.json`. Bot yang direstart tidak mengirim dua kali, dan bot yang baru hidup setelah jam kirim tetap mengirim laporan hari itu. Kalau screening gagal (misalnya API Indodax down), bot mencoba lagi tiap 15 menit, maksimal 4 kali sehari. Untuk memaksa kirim ulang hari ini, hapus file state tersebut.
 
 ---
 

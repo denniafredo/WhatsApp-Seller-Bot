@@ -77,6 +77,11 @@ const BOT_TEXT_PATTERNS = [
   // Ringkasan hasil rekap: "Total = *Rp...*" diikuti Jumlah/KAS.
   /^\s*total\s*=/i,
   /^\s*\*?\s*cek (kilo|ongkir)\b/i,
+  // Caption nota ("*Nota* - Bu Sari") memuat rupiah di baris totalnya, dan
+  // perintahnya sendiri memuat harga tiap item. Dua-duanya bukan pengeluaran,
+  // jadi keduanya harus keluar dari jangkauan rekap - sekalipun ditulis
+  // sebelum proses ini hidup.
+  /^\s*\*?\s*nota\b/i,
   // Pesan progres selalu satu baris dan diakhiri "..." ("Menulis ke
   // spreadsheet keuangan...", "Menarik transaksi Dashmall..."). Catatan
   // belanja yang diketik orang tidak pernah berbentuk begitu.
